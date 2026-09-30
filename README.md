@@ -119,7 +119,7 @@ Instalação **100% automatizada** em VPS com Docker. O script descobre o banco 
 ### 1. Clonar e Instalar na VPS (Comando Único)
 Execute no terminal da sua VPS:
 ```bash
-git clone -b melhorias https://github.com/reinaldorocha/track2.git /root/utm-track && cd /root/utm-track && chmod +x install.sh update.sh && ./install.sh
+git clone https://github.com/reinaldorocha/track2.git /root/utm-track && cd /root/utm-track && chmod +x install.sh update.sh && ./install.sh
 ```
 > O instalador pedirá **apenas o domínio da aplicação** (ex: `track.seudominio.com.br`). Todo o resto é configurado sozinho!
 
