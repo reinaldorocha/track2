@@ -55,6 +55,16 @@ export async function GET(req: Request) {
       if (to) where.orderedAt.lte = new Date(to)
     }
 
+    const statsWhere: any = { workspaceId }
+    if (platform && platform !== 'all') {
+      statsWhere.platform = platform.toLowerCase()
+    }
+    if (from || to) {
+      statsWhere.orderedAt = {}
+      if (from) statsWhere.orderedAt.gte = new Date(from)
+      if (to) statsWhere.orderedAt.lte = new Date(to)
+    }
+
     const [sales, totalCount, allStatusSales] = await Promise.all([
       prisma.sale.findMany({
         where,
@@ -67,7 +77,7 @@ export async function GET(req: Request) {
       }),
       prisma.sale.count({ where }),
       prisma.sale.findMany({
-        where: { workspaceId },
+        where: statsWhere,
         select: {
           status: true,
           grossAmount: true,

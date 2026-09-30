@@ -23,6 +23,7 @@ import {
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
 import { playNotificationSound, SoundType } from "@/lib/sound";
+import { HourlySalesBreakdown } from "@/components/sales/hourly-sales-breakdown";
 
 type SaleItem = {
   id: string;
@@ -81,6 +82,7 @@ export default function SalesPage() {
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [search, setSearch] = useState<string>("");
   const [selectedSale, setSelectedSale] = useState<SaleItem | null>(null);
+  const [viewMode, setViewMode] = useState<"feed" | "hourly">("feed");
 
   const { data, isLoading } = useQuery<SalesResponse>({
     queryKey: ["sales-list", statusFilter, platformFilter, search],
@@ -158,9 +160,37 @@ export default function SalesPage() {
             Feed unificado de pedidos, conciliação financeira de Pix, reembolsos e matching em tempo real com Meta Ads
           </p>
         </div>
+
+        {/* Alternador de Visualização: Feed vs Vendas por Horário */}
+        <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1.5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+          <button
+            onClick={() => setViewMode("feed")}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
+              viewMode === "feed"
+                ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow"
+                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+            }`}
+          >
+            📋 Feed de Pedidos
+          </button>
+          <button
+            onClick={() => setViewMode("hourly")}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
+              viewMode === "hourly"
+                ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow"
+                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+            }`}
+          >
+            ⏰ Vendas por Horário (24h)
+          </button>
+        </div>
       </div>
 
-      {/* KPI Cards Grid */}
+      {viewMode === "hourly" ? (
+        <HourlySalesBreakdown initialPlatform={platformFilter} />
+      ) : (
+        <>
+          {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <div className="flex items-center justify-between text-xs text-gray-500">
@@ -410,6 +440,8 @@ export default function SalesPage() {
           </table>
         </div>
       </div>
+      </>
+    )}
 
       {/* Sale Details Modal / Drawer */}
       {selectedSale && (

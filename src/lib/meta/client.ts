@@ -108,5 +108,91 @@ export class MetaApiClient {
     const data = await this.get<{ data: any[] }>(`/${accountId}/insights`, params)
     return data.data || []
   }
+
+  async post<T>(path: string, data: Record<string, any> = {}, params: Record<string, string> = {}): Promise<T> {
+    try {
+      const response = await axios.post(`${BASE}${path}`, data, {
+        params: { ...params, access_token: this.accessToken },
+        timeout: 20000,
+      })
+      return response.data
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const errorData = err.response?.data?.error
+        if (errorData) {
+          throw new MetaApiError(
+            errorData.message || 'Erro na Meta Graph API',
+            errorData.code,
+            errorData.error_subcode
+          )
+        }
+      }
+      throw err
+    }
+  }
+
+  async updateCampaign(
+    campaignId: string,
+    data: { status?: string; name?: string; daily_budget?: number; lifetime_budget?: number }
+  ) {
+    const id = campaignId.replace(/^act_/, '')
+    return this.post<{ success: boolean }>(`/${id}`, data)
+  }
+
+  async updateAdSet(
+    adSetId: string,
+    data: { status?: string; name?: string; daily_budget?: number; lifetime_budget?: number }
+  ) {
+    const id = adSetId.replace(/^act_/, '')
+    return this.post<{ success: boolean }>(`/${id}`, data)
+  }
+
+  async updateAd(
+    adId: string,
+    data: { status?: string; name?: string }
+  ) {
+    const id = adId.replace(/^act_/, '')
+    return this.post<{ success: boolean }>(`/${id}`, data)
+  }
+
+  async duplicateCampaign(
+    campaignId: string,
+    options: { deepCopy?: boolean; status?: string; suffix?: string } = {}
+  ) {
+    const id = campaignId.replace(/^act_/, '')
+    const deepCopy = options.deepCopy !== false
+    const statusOption = options.status || 'PAUSED'
+    return this.post<{ id?: string; copied_parent_id?: string; success?: boolean }>(`/${id}/copies`, {
+      deep_copy: deepCopy,
+      status_option: statusOption,
+      ...(options.suffix ? { rename_options: { suffix: options.suffix } } : {}),
+    })
+  }
+
+  async duplicateAdSet(
+    adSetId: string,
+    options: { deepCopy?: boolean; status?: string; suffix?: string } = {}
+  ) {
+    const id = adSetId.replace(/^act_/, '')
+    const deepCopy = options.deepCopy !== false
+    const statusOption = options.status || 'PAUSED'
+    return this.post<{ id?: string; copied_parent_id?: string; success?: boolean }>(`/${id}/copies`, {
+      deep_copy: deepCopy,
+      status_option: statusOption,
+      ...(options.suffix ? { rename_options: { suffix: options.suffix } } : {}),
+    })
+  }
+
+  async duplicateAd(
+    adId: string,
+    options: { status?: string; suffix?: string } = {}
+  ) {
+    const id = adId.replace(/^act_/, '')
+    const statusOption = options.status || 'PAUSED'
+    return this.post<{ id?: string; copied_parent_id?: string; success?: boolean }>(`/${id}/copies`, {
+      status_option: statusOption,
+      ...(options.suffix ? { rename_options: { suffix: options.suffix } } : {}),
+    })
+  }
 }
 

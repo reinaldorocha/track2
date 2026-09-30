@@ -5,7 +5,9 @@ import { Link2, Layers } from "lucide-react";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/utils";
 
 interface DistributionItem {
-  name: string;
+  name?: string;
+  source?: string;
+  platform?: string;
   count: number;
   revenue: number;
   percentage: number;
@@ -45,27 +47,30 @@ export function SourceDistributionCard({
           </p>
         ) : (
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-            {sources.map((item) => (
-              <div
-                key={item.name}
-                className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#061224] border border-slate-100 dark:border-[#142C52]/60 text-xs"
-              >
-                <div>
-                  <p className="font-bold text-slate-800 dark:text-slate-200 capitalize">
-                    {item.name}
-                  </p>
-                  <p className="text-[10px] text-slate-400">{formatNumber(item.count)} venda(s)</p>
+            {sources.map((item, index) => {
+              const displayName = item.name || item.source || "Origem";
+              return (
+                <div
+                  key={`${displayName}-${index}`}
+                  className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#061224] border border-slate-100 dark:border-[#142C52]/60 text-xs"
+                >
+                  <div>
+                    <p className="font-bold text-slate-800 dark:text-slate-200 capitalize">
+                      {displayName}
+                    </p>
+                    <p className="text-[10px] text-slate-400">{formatNumber(item.count)} venda(s)</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono font-bold text-slate-900 dark:text-white">
+                      {formatCurrency(item.revenue)}
+                    </p>
+                    <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                      {formatPercent(item.percentage)}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="font-mono font-bold text-slate-900 dark:text-white">
-                    {formatCurrency(item.revenue)}
-                  </p>
-                  <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-                    {formatPercent(item.percentage)}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -91,27 +96,30 @@ export function SourceDistributionCard({
           </p>
         ) : (
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-            {platforms.map((item) => (
-              <div
-                key={item.name}
-                className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#061224] border border-slate-100 dark:border-[#142C52]/60 text-xs"
-              >
-                <div>
-                  <p className="font-bold text-slate-800 dark:text-slate-200 capitalize">
-                    {item.name}
-                  </p>
-                  <p className="text-[10px] text-slate-400">{formatNumber(item.count)} venda(s)</p>
+            {platforms.map((item, index) => {
+              const displayName = item.name || item.platform || "Plataforma";
+              return (
+                <div
+                  key={`${displayName}-${index}`}
+                  className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#061224] border border-slate-100 dark:border-[#142C52]/60 text-xs"
+                >
+                  <div>
+                    <p className="font-bold text-slate-800 dark:text-slate-200 capitalize">
+                      {displayName}
+                    </p>
+                    <p className="text-[10px] text-slate-400">{formatNumber(item.count)} venda(s)</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono font-bold text-slate-900 dark:text-white">
+                      {formatCurrency(item.revenue)}
+                    </p>
+                    <p className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                      {formatPercent(item.percentage)}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="font-mono font-bold text-slate-900 dark:text-white">
-                    {formatCurrency(item.revenue)}
-                  </p>
-                  <p className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
-                    {formatPercent(item.percentage)}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

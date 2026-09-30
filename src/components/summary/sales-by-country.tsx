@@ -86,7 +86,7 @@ export function SalesByCountry({ data = [], loading = false }: SalesByCountryPro
         <div className="space-y-3 overflow-y-auto max-h-56 pr-1">
           {data.map((item, index) => (
             <div
-              key={item.country}
+              key={`${item.country || item.code || 'country'}-${index}`}
               className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 dark:bg-[#061224] border border-slate-100 dark:border-[#142C52]/60 hover:border-blue-400 transition-colors"
             >
               <div className="flex items-center gap-2.5">
@@ -123,9 +123,9 @@ export function SalesByCountry({ data = [], loading = false }: SalesByCountryPro
             Distribuição Global
           </p>
           <div className="flex flex-wrap justify-center gap-2 pt-1">
-            {data.map((item) => (
+            {data.map((item, index) => (
               <span
-                key={item.country}
+                key={`${item.country || item.code || 'country'}-${index}`}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-[#081A33] border border-slate-200 dark:border-[#142C52] rounded-md text-[11px] font-medium text-slate-700 dark:text-slate-300"
               >
                 <span>{flagMap[item.code] || "🌐"}</span>

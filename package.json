@@ -17,7 +17,10 @@
     "db:switch:postgres": "node scripts/switch-database.js postgres && prisma generate",
     "db:switch:sqlite": "node scripts/switch-database.js sqlite && prisma generate",
     "test": "tsx --test tests/**/*.test.ts",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "cap:sync": "cap sync",
+    "cap:android": "cap open android",
+    "cap:ios": "cap open ios"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

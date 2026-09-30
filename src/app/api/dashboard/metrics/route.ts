@@ -6,6 +6,8 @@ import { purgeTestSales } from '@/lib/integrations/normalizer'
 import {
   calcCPA, calcCPC, calcCPM, calcCTR, calcMargin, calcProfit, calcROAS, calcROI, calcCPI
 } from '@/lib/metrics'
+import { calculateFinancialMetrics } from '@/lib/calculations/financial-engine'
+import { triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
 
 export async function GET(req: Request) {
   try {
@@ -28,6 +30,9 @@ export async function GET(req: Request) {
 
     // Purge any synthetic test sales before metric aggregation
     await purgeTestSales(workspaceId)
+
+    // Disparo não-bloqueante de auto-sync em background para manter métricas de Meta Ads atualizadas
+    triggerBackgroundMetaSyncIfNeeded(workspaceId, 15).catch(() => {})
 
     // 1. Consultar Vendas Reais do Período
     const allSales = await prisma.sale.findMany({
@@ -65,7 +70,6 @@ export async function GET(req: Request) {
     })
 
     const grossRevenue = approvedSalesList.reduce((acc, s) => acc + s.grossAmount, 0)
-    const netRevenue = approvedSalesList.reduce((acc, s) => acc + (s.netAmount > 0 ? s.netAmount : s.grossAmount), 0)
     const pendingAmount = pendingSalesList.reduce((acc, s) => acc + s.grossAmount, 0)
     const refundAmount = refundedSalesList.reduce((acc, s) => acc + s.grossAmount, 0)
     const chargebackAmount = chargebackSalesList.reduce((acc, s) => acc + s.grossAmount, 0)
@@ -127,32 +131,28 @@ export async function GET(req: Request) {
       where: { workspaceId, isActive: true }
     })
 
-    let totalFees = 0
-    if (fees.length > 0) {
-      for (const s of approvedSalesList) {
-        for (const fee of fees) {
-          if (!fee.platform || fee.platform.toLowerCase() === (s.platform || '').toLowerCase()) {
-            totalFees += (s.grossAmount * (fee.percentage / 100)) + fee.fixedAmount
-          }
-        }
-      }
-    }
-
     const taxes = await prisma.tax.findMany({
       where: { workspaceId, isActive: true }
     })
-    const taxRate = taxes.reduce((acc, t) => acc + t.percentage, 0) / 100
-    const impostoTotal = grossRevenue * taxRate
 
-    // 5. Calcular Lucro Real com todos os fatores deduzidos
-    const profit = calcProfit({
-      netRevenue,
+    const financial = calculateFinancialMetrics({
+      sales: approvedSalesList,
+      fees,
+      taxes,
       adSpend,
-      productCost: 0,
-      fees: totalFees,
-      taxes: impostoTotal,
       expenses: totalExpenses
     })
+
+    const totalFees = financial.totalFees
+    const netRevenue = financial.netRevenue
+    const impostoVendas = financial.salesTaxAmount
+    const impostoMeta = financial.metaAdsTaxAmount
+    const impostoTotal = financial.totalTaxes
+    const profit = financial.netProfit
+    const margin = financial.margin
+    const roi = financial.roi
+    const roas = financial.roas
+    const realRoas = financial.realRoas
 
     // 6. Série Temporal REAL para Gráficos
     const isSingleDay = Math.abs(to.getTime() - from.getTime()) <= 86400000 + 3600000 // <= 25 horas (Hoje/Ontem)
@@ -233,9 +233,6 @@ export async function GET(req: Request) {
     const ctr = calcCTR(clicks, impressions)
     const cpm = calcCPM(adSpend, impressions)
     const cpi = calcCPI(adSpend, effectiveICs || approvedSales)
-    const roas = calcROAS(grossRevenue, adSpend)
-    const roi = calcROI(profit, adSpend + totalExpenses + impostoTotal)
-    const margin = calcMargin(profit, grossRevenue)
 
     return NextResponse.json({
       // Financeiro
@@ -245,8 +242,15 @@ export async function GET(req: Request) {
       profit,
       margin,
       totalExpenses,
+      expensesCount: expenses.length,
       totalFees,
+      feeBreakdown: financial.feeBreakdown,
       impostoTotal,
+      impostoVendas,
+      impostoMeta,
+      metaAdsTaxRate: financial.metaAdsTaxRate,
+      salesTaxRate: financial.salesTaxRate,
+      totalInvestment: financial.totalInvestment,
 
       // Vendas
       sales: totalSales,
@@ -272,6 +276,7 @@ export async function GET(req: Request) {
       cpm,
       cpi,
       roas,
+      realRoas,
       roi,
 
       // Gráficos

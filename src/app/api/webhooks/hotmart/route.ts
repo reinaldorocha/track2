@@ -5,20 +5,17 @@ import {
   normalizeNetAmount, 
   normalizeSaleStatus, 
   normalizeSalePaymentMethod, 
+  normalizeSaleInstallments,
   normalizeSaleUtms, 
   isHotmartTestEvent,
   upsertSale 
 } from '@/lib/integrations/normalizer'
 import { createSaleNotification, SaleNotificationType } from '@/lib/notifications/service'
+import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
 
 export async function POST(req: Request) {
   let webhookEventId: string | null = null
   try {
-    const hottok = req.headers.get('x-hotmart-hottok')
-    if (process.env.HOTMART_WEBHOOK_SECRET && hottok && hottok !== process.env.HOTMART_WEBHOOK_SECRET) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     const { searchParams } = new URL(req.url)
     const queryWs = searchParams.get('workspaceId') || searchParams.get('workspace_id') || req.headers.get('x-workspace-id')
 
@@ -26,6 +23,21 @@ export async function POST(req: Request) {
     if (!payload) {
       return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 })
     }
+
+    const hottok = req.headers.get('x-hotmart-hottok') || searchParams.get('hottok') || (payload && typeof payload.hottok === 'string' ? payload.hottok : null)
+
+    const authResult = await authenticateWebhook({
+      platform: 'hotmart',
+      providedToken: hottok,
+      queryWorkspaceId: queryWs,
+      globalEnvSecret: process.env.HOTMART_WEBHOOK_SECRET
+    })
+
+    if (!authResult.authorized) {
+      return NextResponse.json({ error: authResult.error }, { status: authResult.status })
+    }
+
+    const workspaceId = authResult.workspaceId!
 
     const event = String(payload.event || payload.event_type || 'PURCHASE_APPROVED')
     const data = (payload.data as Record<string, unknown>) || payload
@@ -36,20 +48,6 @@ export async function POST(req: Request) {
     }
 
     const transaction = String(purchase.transaction || payload.transaction || payload.id || `HOTMART_${Date.now()}`)
-
-    let workspaceId: string | null | undefined = queryWs
-    if (!workspaceId) {
-      const integration = await prisma.integration.findFirst({ 
-        where: { platform: 'hotmart' } 
-      })
-      workspaceId = integration?.workspaceId
-    }
-
-    if (!workspaceId) {
-      const defaultWs = await prisma.workspace.findFirst({ orderBy: { createdAt: 'asc' } })
-      if (!defaultWs) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
-      workspaceId = defaultWs.id
-    }
 
     const idempotencyKey = `hotmart_${transaction}_${event}`
     
@@ -128,11 +126,14 @@ export async function POST(req: Request) {
       platform: 'hotmart',
       externalId: transaction,
       externalRef: paymentMethod,
+      paymentMethod,
+      installments: normalizeSaleInstallments(payload, 'hotmart'),
       status,
       grossAmount: grossPrice,
       netAmount: netPrice,
       currency: String(priceObj.currency_code || purchase.currency || 'BRL'),
       customerEmail: buyer.email ? String(buyer.email) : undefined,
+      customerPhone: (buyer.phone || buyer.checkout_phone) ? String(buyer.phone || buyer.checkout_phone) : undefined,
       utmSource: utms.utmSource,
       utmMedium: utms.utmMedium,
       utmCampaign: utms.utmCampaign,
@@ -164,7 +165,8 @@ export async function POST(req: Request) {
           status,
           grossAmount: grossPrice,
           netAmount: netPrice,
-          isTest: false
+          isTest: false,
+          capi: sale.capiResult
         })
       }
     })
@@ -193,7 +195,8 @@ export async function POST(req: Request) {
       success: true, 
       saleId: sale.id, 
       status: sale.status,
-      isTest: false 
+      isTest: false,
+      capi: sale.capiResult
     })
   } catch (error) {
     console.error('[Hotmart Webhook] Error:', error)

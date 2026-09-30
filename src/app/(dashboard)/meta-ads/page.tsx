@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
-import { getDateRange, formatCurrency, formatDate, formatNumber } from "@/lib/utils";
+import { getDateRange, formatCurrency, formatDate, formatDateTime, formatNumber } from "@/lib/utils";
 import { CampaignsTable, MetaTableLevel } from "@/components/meta-ads/campaigns-table";
 
 type AdAccount = {
@@ -68,6 +68,17 @@ function MetaAdsContent() {
     ads?: number;
     insights?: number;
   } | null>(null);
+
+  // Monitoramento do Auto-Sync em Background (atualiza a cada 20s)
+  const { data: autoSyncData } = useQuery({
+    queryKey: ["meta-auto-sync"],
+    queryFn: async () => {
+      const res = await fetch("/api/meta/auto-sync");
+      if (!res.ok) return null;
+      return res.json();
+    },
+    refetchInterval: 20000,
+  });
 
   // Busca contas vinculadas no banco
   const { data: accountsData, isLoading: loadingAccounts } = useQuery({
@@ -266,7 +277,27 @@ function MetaAdsContent() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Auto-Sync Live Indicator */}
+          {autoSyncData?.enabled && (
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-xs">
+              <span className="relative flex h-2 w-2">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 ${autoSyncData.isSyncing ? "duration-700" : ""}`} />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              <div className="flex flex-col text-[11px] leading-tight">
+                <span className="font-bold text-emerald-800 dark:text-emerald-300">
+                  {autoSyncData.isSyncing ? "Auto-Sync em andamento..." : "Auto-Sync Ativo (a cada 15m)"}
+                </span>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                  {autoSyncData.lastSyncAt
+                    ? `Último sync: ${formatDateTime(autoSyncData.lastSyncAt)}`
+                    : "Aguardando primeiro ciclo"}
+                </span>
+              </div>
+            </div>
+          )}
+
           <PeriodSelector
             value={period.preset}
             onChange={(preset, from, to) => setPeriod({ preset, from, to, label: preset })}

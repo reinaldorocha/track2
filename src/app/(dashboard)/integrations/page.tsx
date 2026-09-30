@@ -30,10 +30,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { LiveLinkInspector } from "@/components/tracking/live-link-inspector";
 
 export default function IntegrationsHubPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"ANÚNCIOS" | "WEBHOOKS" | "UTMs" | "PIXEL" | "TESTES">("ANÚNCIOS");
+  const [activeTab, setActiveTab] = useState<"ANÚNCIOS" | "WEBHOOKS" | "UTMs" | "PIXEL" | "TESTES" | "INSPETOR">("ANÚNCIOS");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Estados dos Pixels
@@ -47,7 +48,7 @@ export default function IntegrationsHubPage() {
     leadRule: true,
     addToCartRule: true,
     initiateCheckoutRule: true,
-    checkoutUrlPattern: "pay.hotmart.com,checkout.cakto.com.br,yampi.io,myshopify.com",
+    checkoutUrlPattern: "pay.hotmart.com,checkout.cakto.com.br,kiwify.com.br,getfy.com,app.profjonathanrocha.com.br,yampi.io,myshopify.com",
     purchaseRule: true,
   });
 
@@ -84,7 +85,26 @@ export default function IntegrationsHubPage() {
     queryFn: () => fetch("/api/events?limit=5").then((r) => r.json()),
   });
 
+  const { data: productsData } = useQuery({
+    queryKey: ["products"],
+    queryFn: () => fetch("/api/products").then((r) => r.json()),
+  });
+
   // Mutações
+  const updateProductPixelMutation = useMutation({
+    mutationFn: async ({ productId, pixelId }: { productId: string; pixelId: string | null }) => {
+      const res = await fetch("/api/products", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId, pixelId }),
+      });
+      if (!res.ok) throw new Error("Erro ao atualizar vínculo do produto com o pixel");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
   const savePixelMutation = useMutation({
     mutationFn: async (body: typeof pixelForm) => {
       const res = await fetch("/api/pixels", {
@@ -107,7 +127,7 @@ export default function IntegrationsHubPage() {
         leadRule: true,
         addToCartRule: true,
         initiateCheckoutRule: true,
-        checkoutUrlPattern: "pay.hotmart.com,checkout.cakto.com.br,yampi.io,myshopify.com",
+        checkoutUrlPattern: "pay.hotmart.com,checkout.cakto.com.br,kiwify.com.br,getfy.com,app.profjonathanrocha.com.br,yampi.io,myshopify.com",
         purchaseRule: true,
       });
     },
@@ -163,7 +183,7 @@ export default function IntegrationsHubPage() {
     }
   };
 
-  const runIntegrationTest = async (type: "pixel" | "webhook" | "cakto" | "hotmart") => {
+  const runIntegrationTest = async (type: "pixel" | "webhook" | "cakto" | "hotmart" | "kiwify" | "getfy") => {
     setTestStatus(`Executando teste de ${type}...`);
     try {
       if (type === "cakto") {
@@ -200,6 +220,61 @@ export default function IntegrationsHubPage() {
           }),
         });
         setTestStatus(res.ok ? "✅ Webhook Hotmart validado com sucesso (HTTP 200)!" : "❌ Erro ao validar Hotmart");
+      } else if (type === "kiwify") {
+        const res = await fetch("/api/webhooks/kiwify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            order_id: `test_kiwify_${Date.now()}`,
+            order_status: "paid",
+            order_amount: 19700,
+            Commissions: { charge_amount: 19700, my_commission: 18000 },
+            Customer: { email: "comprador@kiwify.com", mobile: "11999998888" },
+            TrackingParameters: { src: "facebook_ads", utm_source: "fb", utm_campaign: "campanha_teste" }
+          }),
+        });
+        const d = await res.json().catch(() => ({}));
+        setTestStatus(res.ok ? "✅ Webhook Kiwify validado com sucesso (HTTP 200)!" : `❌ Erro: ${d.error || 'Falha ao validar Kiwify'}`);
+      } else if (type === "getfy") {
+        const res = await fetch("/api/webhooks/getfy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: "pedido_pago",
+            event_label: "Pedido pago",
+            payload: {
+              order: {
+                id: `test_getfy_${Date.now()}`,
+                status: "completed",
+                amount: 197.0,
+                currency: "BRL",
+                created_at: new Date().toISOString()
+              },
+              customer: {
+                email: "comprador@getfy.com.br",
+                phone: "5511999997777",
+                name: "Cliente Getfy Teste"
+              },
+              amount: 197.0,
+              status: "paid",
+              paymentMethod: "pix",
+              paymentMethodName: "Pix",
+              product: {
+                id: "prod-getfy-test",
+                name: "Produto Exemplo Getfy"
+              },
+              tracking: {
+                utm_source: "facebook",
+                utm_medium: "cpc",
+                utm_campaign: "campanha_getfy_teste",
+                src: "facebook",
+                sck: "campanha_getfy_teste"
+              }
+            }
+          }),
+        });
+        const d = await res.json().catch(() => ({}));
+        setTestStatus(res.ok ? "✅ Webhook Getfy validado com sucesso (HTTP 200)!" : `❌ Erro: ${d.error || 'Falha ao validar Getfy'}`);
       } else {
         setTestStatus("✅ Evento de teste disparado com sucesso!");
       }
@@ -213,14 +288,16 @@ export default function IntegrationsHubPage() {
   const appUrl = typeof window !== "undefined" ? window.location.origin : "https://utm-track-navy.vercel.app";
   const connectedAccountsCount = adAccountsData?.accounts?.length || 0;
   const pixels = pixelsData?.pixels || [];
+  const products = productsData?.products || [];
   const genericEndpoints = genericEndpointsData?.endpoints || [];
 
-  const tabs: Array<"ANÚNCIOS" | "WEBHOOKS" | "UTMs" | "PIXEL" | "TESTES"> = [
+  const tabs: Array<"ANÚNCIOS" | "WEBHOOKS" | "UTMs" | "PIXEL" | "TESTES" | "INSPETOR"> = [
     "ANÚNCIOS",
     "WEBHOOKS",
     "UTMs",
     "PIXEL",
     "TESTES",
+    "INSPETOR",
   ];
 
   return (
@@ -559,6 +636,96 @@ export default function IntegrationsHubPage() {
               <div className="pt-2 flex justify-between items-center text-xs">
                 <span className="text-slate-400 text-[11px]">Header: x-shopify-hmac-sha256</span>
                 <span className="text-emerald-600 font-semibold">HMAC Validado</span>
+              </div>
+            </div>
+
+            {/* Kiwify */}
+            <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-[#13C15D]" />
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">Kiwify</h3>
+                </div>
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 text-[10px] font-bold rounded-full">
+                  Ativo
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Suporta: Compra Aprovada, Pix Gerado, Aguardando Pagamento, Reembolso, Chargeback, Conversão de Centavos e UTMs.
+              </p>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                  URL do Webhook (Cole na Kiwify):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${appUrl}/api/webhooks/kiwify`}
+                    className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/kiwify`, "kiwify")}
+                    className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
+                    title="Copiar URL"
+                  >
+                    {copiedKey === "kiwify" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+              <div className="pt-2 flex justify-between items-center text-xs">
+                <span className="text-slate-400 text-[11px]">Dica: Cole em Apps → Webhooks</span>
+                <button
+                  onClick={() => runIntegrationTest("kiwify")}
+                  className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
+                >
+                  Testar Webhook
+                </button>
+              </div>
+            </div>
+
+            {/* Getfy */}
+            <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-indigo-500" />
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">Getfy</h3>
+                </div>
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 text-[10px] font-bold rounded-full">
+                  Ativo
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Suporta: Pedido Pago, Pix Gerado, Boleto Gerado, Assinaturas, Reembolso, Recusado, Cancelado e UTMs.
+              </p>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                  URL do Webhook (Cole no Getfy):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${appUrl}/api/webhooks/getfy`}
+                    className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/getfy`, "getfy")}
+                    className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
+                    title="Copiar URL"
+                  >
+                    {copiedKey === "getfy" ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+              <div className="pt-2 flex justify-between items-center text-xs">
+                <span className="text-slate-400 text-[11px]">Header: Authorization (Bearer) ou ?token=</span>
+                <button
+                  onClick={() => runIntegrationTest("getfy")}
+                  className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
+                >
+                  Testar Webhook
+                </button>
               </div>
             </div>
           </div>
@@ -901,6 +1068,85 @@ export default function IntegrationsHubPage() {
             </div>
           )}
 
+          {/* Mapeamento de Produtos para Pixels (Multi-Pixel Routing) */}
+          <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-blue-500" />
+                  Roteamento de Pixel por Produto (Multi-Produto & Multi-Campanha)
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Vincule cada produto ao seu respectivo Pixel da Meta. Garante que vendas de campanhas diferentes sejam enviadas estritamente ao Pixel correto, sem ambiguidades.
+                </p>
+              </div>
+            </div>
+
+            {products.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs bg-slate-50/50 dark:bg-[#0E2442]/30 rounded-lg border border-dashed border-slate-200 dark:border-[#1E3E6B]">
+                Nenhum produto cadastrado ainda. Quando suas vendas chegarem via Webhook ou você cadastrar um produto, ele aparecerá aqui para ser vinculado a um Pixel.
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-slate-100 dark:border-[#142C52] rounded-lg">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-[#0E2442] text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-[#142C52]">
+                    <tr>
+                      <th className="py-2.5 px-3">Produto</th>
+                      <th className="py-2.5 px-3">Plataforma</th>
+                      <th className="py-2.5 px-3">Preço</th>
+                      <th className="py-2.5 px-3">Pixel Vinculado</th>
+                      <th className="py-2.5 px-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-[#142C52]">
+                    {products.map((prod: any) => (
+                      <tr key={prod.id} className="hover:bg-slate-50/50 dark:hover:bg-[#0E2442]/30">
+                        <td className="py-3 px-3 font-medium text-slate-900 dark:text-white">
+                          {prod.name}
+                          {prod.externalId && (
+                            <span className="block text-[10px] text-slate-400 font-mono">ID: {prod.externalId}</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 uppercase text-[11px] font-bold text-slate-500">
+                          {prod.platform || 'Genérico'}
+                        </td>
+                        <td className="py-3 px-3 font-semibold text-slate-700 dark:text-slate-200">
+                          {prod.price ? formatCurrency(prod.price) : '—'}
+                        </td>
+                        <td className="py-3 px-3">
+                          <select
+                            value={prod.pixelId || ""}
+                            onChange={(e) => updateProductPixelMutation.mutate({ productId: prod.id, pixelId: e.target.value || null })}
+                            disabled={updateProductPixelMutation.isPending}
+                            className="bg-white dark:bg-[#0E2442] border border-slate-300 dark:border-[#1E3E6B] rounded-lg px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 outline-none"
+                          >
+                            <option value="">Nenhum (Fallback seguro se único)</option>
+                            {pixels.map((pix: any) => (
+                              <option key={pix.id} value={pix.id}>
+                                {pix.name} ({pix.pixelId})
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-3 px-3">
+                          {prod.pixelId ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Vinculado
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-amber-500 font-medium">
+                              <AlertCircle className="w-3.5 h-3.5" /> Não vinculado
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* Modal Adicionar / Configurar Pixel */}
           {isPixelModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -1090,7 +1336,29 @@ export default function IntegrationsHubPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-4 shadow-sm space-y-3">
+              <h3 className="font-bold text-xs text-slate-900 dark:text-white">Testar Webhook Getfy</h3>
+              <p className="text-[11px] text-slate-400">Simula pedido pago de R$ 197,00</p>
+              <button
+                onClick={() => runIntegrationTest("getfy")}
+                className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow"
+              >
+                Disparar Teste Getfy
+              </button>
+            </div>
+
+            <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-4 shadow-sm space-y-3">
+              <h3 className="font-bold text-xs text-slate-900 dark:text-white">Testar Webhook Kiwify</h3>
+              <p className="text-[11px] text-slate-400">Simula venda paga de R$ 197,00</p>
+              <button
+                onClick={() => runIntegrationTest("kiwify")}
+                className="w-full py-1.5 bg-[#13C15D] hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow"
+              >
+                Disparar Teste Kiwify
+              </button>
+            </div>
+
             <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-4 shadow-sm space-y-3">
               <h3 className="font-bold text-xs text-slate-900 dark:text-white">Testar Webhook Cakto</h3>
               <p className="text-[11px] text-slate-400">Simula venda aprovada de R$ 97,00</p>
@@ -1135,6 +1403,20 @@ export default function IntegrationsHubPage() {
               </Link>
             </div>
           </div>
+
+          {/* Testador de Rastreamento ao Vivo integrado */}
+          <div className="pt-6 border-t border-slate-200 dark:border-[#142C52]">
+            <LiveLinkInspector />
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* 6. ABA: INSPETOR AO VIVO */}
+      {/* ============================================================ */}
+      {activeTab === "INSPETOR" && (
+        <div className="space-y-6">
+          <LiveLinkInspector />
         </div>
       )}
     </div>

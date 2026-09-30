@@ -8,7 +8,6 @@ import {
   BarChart3, 
   LayoutDashboard, 
   AppWindow,
-  FileText,
   TrendingUp,
   Link2,
   ShoppingBag,
@@ -33,7 +32,6 @@ const navigation = [
     title: 'PRINCIPAL',
     items: [
       { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-      { name: 'Resumo', href: '/summary', icon: FileText },
       { name: 'Meta Ads', href: '/meta-ads', icon: TrendingUp },
       { name: 'Integrações', href: '/integrations', icon: Plug },
     ],

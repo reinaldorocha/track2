@@ -79,6 +79,8 @@ export async function GET(req: Request) {
     const webhookCountsByPlatform: Record<string, { total: number; processed: number; failed: number }> = {
       hotmart: { total: 0, processed: 0, failed: 0 },
       cakto: { total: 0, processed: 0, failed: 0 },
+      kiwify: { total: 0, processed: 0, failed: 0 },
+      getfy: { total: 0, processed: 0, failed: 0 },
       yampi: { total: 0, processed: 0, failed: 0 },
       shopify: { total: 0, processed: 0, failed: 0 },
       generic: { total: 0, processed: 0, failed: 0 }

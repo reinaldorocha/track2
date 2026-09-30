@@ -12,6 +12,14 @@ import {
   calcProfit,
   formatMetric
 } from '../src/lib/metrics'
+import {
+  calculateSaleFee,
+  calculateFinancialMetrics,
+  classifyPaymentMethodForFee
+} from '../src/lib/calculations/financial-engine'
+import {
+  normalizeSaleInstallments
+} from '../src/lib/integrations/normalizer'
 
 describe('Cálculos de Métricas de Marketing e Finanças', () => {
   it('Cálculo de CPM (Custo por Mil Impressões)', () => {
@@ -157,5 +165,179 @@ describe('Filtros de Período e Agregações Temporais', () => {
     assert.equal(approvedList.length, 2)
     assert.equal(grossRevenue, 300)
     assert.equal(netRevenue, 270)
+  })
+
+  it('Classificação de Método de Pagamento para Regras de Taxa', () => {
+    assert.equal(classifyPaymentMethodForFee('pix', null, 1), 'pix')
+    assert.equal(classifyPaymentMethodForFee('PIX', null, 1), 'pix')
+    assert.equal(classifyPaymentMethodForFee('boleto', null, 1), 'boleto')
+    assert.equal(classifyPaymentMethodForFee('credit_card', null, 1), 'card_single')
+    assert.equal(classifyPaymentMethodForFee('credit_card', null, 3), 'card_installments')
+    assert.equal(classifyPaymentMethodForFee(null, 'card', 12), 'card_installments')
+  })
+
+  it('Cálculo de Taxas por Método: Pix, Cartão à Vista e Cartão Parcelado', () => {
+    const feeRules = [
+      {
+        id: '1',
+        name: 'Taxa Pix',
+        type: 'checkout',
+        paymentMethod: 'pix',
+        percentage: 1.99,
+        fixedAmount: 0.0,
+        isActive: true
+      },
+      {
+        id: '2',
+        name: 'Taxa Cartão à Vista',
+        type: 'checkout',
+        paymentMethod: 'card_single',
+        percentage: 3.99,
+        fixedAmount: 1.00,
+        isActive: true
+      },
+      {
+        id: '3',
+        name: 'Taxa Cartão Parcelado',
+        type: 'checkout',
+        paymentMethod: 'card_installments',
+        percentage: 4.99,
+        fixedAmount: 1.00,
+        installmentFee: 1.50, // 1.5% adicional por parcela além da 1ª
+        isActive: true
+      }
+    ]
+
+    // 1. Venda Pix de R$ 100: 100 * 1.99% = 1.99
+    const pixFee = calculateSaleFee(
+      { grossAmount: 100, paymentMethod: 'pix', installments: 1 },
+      feeRules
+    )
+    assert.equal(pixFee, 1.99)
+
+    // 2. Venda Cartão 1x de R$ 100: 100 * 3.99% + 1.00 = 4.99
+    const cardSingleFee = calculateSaleFee(
+      { grossAmount: 100, paymentMethod: 'card', installments: 1 },
+      feeRules
+    )
+    assert.equal(cardSingleFee, 4.99)
+
+    // 3. Venda Cartão em 3x de R$ 100:
+    // Base: 100 * 4.99% + 1.00 = 5.99
+    // Parcelamento: (3 - 1) * 1.50% * 100 = 3.00
+    // Total = 5.99 + 3.00 = 8.99
+    const cardInstFee = calculateSaleFee(
+      { grossAmount: 100, paymentMethod: 'card', installments: 3 },
+      feeRules
+    )
+    assert.equal(cardInstFee, 8.99)
+  })
+
+  it('Prioridade de Plataforma: Regra específica de checkout sobrepõe regra geral', () => {
+    const feeRules = [
+      {
+        name: 'Geral Pix',
+        type: 'checkout',
+        paymentMethod: 'pix',
+        percentage: 2.0,
+        fixedAmount: 0.0,
+        platform: null,
+        isActive: true
+      },
+      {
+        name: 'Getfy Pix Promocional',
+        type: 'checkout',
+        paymentMethod: 'pix',
+        percentage: 0.99,
+        fixedAmount: 0.0,
+        platform: 'getfy',
+        isActive: true
+      }
+    ]
+
+    const getfyFee = calculateSaleFee(
+      { grossAmount: 100, platform: 'getfy', paymentMethod: 'pix' },
+      feeRules
+    )
+    assert.equal(getfyFee, 0.99)
+
+    const caktoFee = calculateSaleFee(
+      { grossAmount: 100, platform: 'cakto', paymentMethod: 'pix' },
+      feeRules
+    )
+    assert.equal(caktoFee, 2.0)
+  })
+
+  it('Motor Financeiro: Dedução de Imposto Meta Ads (IOF), Taxas de Checkout e Imposto s/ Faturamento', () => {
+    const sales = [
+      { id: 's1', grossAmount: 1000, paymentMethod: 'pix', installments: 1 },
+      { id: 's2', grossAmount: 1000, paymentMethod: 'card', installments: 1 },
+      { id: 's3', grossAmount: 1000, paymentMethod: 'card', installments: 3 }
+    ]
+
+    const fees = [
+      { name: 'Pix', type: 'checkout', paymentMethod: 'pix', percentage: 1.0, fixedAmount: 0, isActive: true },
+      { name: 'Cartão 1x', type: 'checkout', paymentMethod: 'card_single', percentage: 3.0, fixedAmount: 0, isActive: true },
+      { name: 'Cartão 3x', type: 'checkout', paymentMethod: 'card_installments', percentage: 5.0, fixedAmount: 0, installmentFee: 1.0, isActive: true }
+    ]
+
+    const taxes = [
+      { name: 'IOF Meta Ads', type: 'meta_ads', percentage: 0.38, isActive: true },
+      { name: 'Simples Nacional', type: 'sales', percentage: 6.0, isActive: true }
+    ]
+
+    const adSpend = 1000 // R$ 1.000,00 investidos no Meta Ads
+    const expenses = 100 // R$ 100,00 de ferramentas
+
+    const result = calculateFinancialMetrics({
+      sales,
+      fees,
+      taxes,
+      adSpend,
+      expenses
+    })
+
+    // Faturamento bruto = 3 x 1000 = 3000
+    assert.equal(result.grossRevenue, 3000)
+
+    // Taxas calculadas:
+    // s1 (Pix): 1000 * 1% = 10
+    // s2 (Cartão 1x): 1000 * 3% = 30
+    // s3 (Cartão 3x): 1000 * (5% + 2 * 1%) = 70
+    // Total fees = 10 + 30 + 70 = 110
+    assert.equal(result.totalFees, 110)
+    assert.equal(result.feeBreakdown.pix, 10)
+    assert.equal(result.feeBreakdown.cardSingle, 30)
+    assert.equal(result.feeBreakdown.cardInstallments, 70)
+
+    // Faturamento líquido = 3000 - 110 = 2890
+    assert.equal(result.netRevenue, 2890)
+
+    // Imposto Meta Ads: 1000 * 0.38% = 3.80
+    assert.equal(result.metaAdsTaxAmount, 3.80)
+    assert.equal(result.totalAdCostWithTaxes, 1003.80)
+
+    // Imposto Vendas: 3000 * 6% = 180
+    assert.equal(result.salesTaxAmount, 180)
+
+    // Lucro Líquido Real = 3000 - 110 - 1000 - 3.80 - 180 - 100 = 1606.20
+    assert.equal(result.netProfit, 1606.20)
+
+    // Margem real: (1606.20 / 3000) * 100 = 53.54%
+    assert.equal(result.margin, 53.54)
+
+    // ROAS simples = 3000 / 1000 = 3.00x
+    assert.equal(result.roas, 3.00)
+
+    // ROAS Real com imposto do Meta = 3000 / 1003.80 = 2.99x
+    assert.equal(result.realRoas, 2.99)
+  })
+
+  it('Normalizador de Parcelas: Extrai corretamente número de parcelas de payloads de checkout', () => {
+    assert.equal(normalizeSaleInstallments({ installments: 6 }), 6)
+    assert.equal(normalizeSaleInstallments({ data: { installments: 12 } }), 12)
+    assert.equal(normalizeSaleInstallments({ purchase: { installments_number: 4 } }), 4)
+    assert.equal(normalizeSaleInstallments({ Order: { installments: 2 } }), 2)
+    assert.equal(normalizeSaleInstallments({}), 1)
   })
 })

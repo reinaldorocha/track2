@@ -97,11 +97,13 @@ describe('Integrações e Normalização de Webhooks', () => {
     assert.equal(key1, key2, 'Mesma transação Cakto gera a mesma chave de idempotência')
   })
 
-  it('Detecção de Checkout por URL: Reconhece gateways configurados (Hotmart, Cakto, Yampi, Shopify)', () => {
+  it('Detecção de Checkout por URL: Reconhece gateways configurados (Hotmart, Cakto, Kiwify, Getfy, domínios próprios como profjonathanrocha e padrão /c/)', () => {
     const checkoutKeywords = [
       'hotmart.com', 'cakto.com.br', 'cacto.com.br', 'yampi.io', 'yampi.com.br',
       'shopify.com', 'myshopify.com', 'kiwify.com.br', 'eduzz.com', 'braip.com',
-      'ticto.com.br', 'monetizze.com.br', 'perfectpay.com.br', 'pay.', 'checkout'
+      'ticto.com.br', 'monetizze.com.br', 'perfectpay.com.br', 'getfy.com', 'getfy.com.br', 'getfy.cloud',
+      'profjonathanrocha.com.br',
+      'pay.', 'checkout', '/c/'
     ]
 
     const isCheckout = (url: string) => {
@@ -113,6 +115,8 @@ describe('Integrações e Normalização de Webhooks', () => {
     assert.equal(isCheckout('https://checkout.cakto.com.br/pay/abc123xyz'), true)
     assert.equal(isCheckout('https://loja.yampi.io/checkout/order/123'), true)
     assert.equal(isCheckout('https://minhaloja.myshopify.com/checkouts/c/12345'), true)
+    assert.equal(isCheckout('https://app.profjonathanrocha.com.br/c/hvgsxbr'), true, 'Checkout próprio Getfy do usuário deve ser reconhecido com precisão')
+    assert.equal(isCheckout('https://app.profjonathanrocha.com.br/c/qualquer-slug'), true)
     assert.equal(isCheckout('https://meusite.com.br/pagina-de-vendas'), false)
   })
 
@@ -562,5 +566,217 @@ describe('Integrações e Normalização de Webhooks', () => {
     assert.equal(isTestSaleRecord(testSale3), true)
     assert.equal(isTestSaleRecord(realSale), false)
   })
+
+  it('Getfy: Normalização de evento pedido_pago com envelope completo e tracking', async () => {
+    const { normalizeSaleAmount, normalizeNetAmount, normalizeSaleStatus, normalizeSalePaymentMethod, normalizeSaleUtms } = await import('../src/lib/integrations/normalizer')
+
+    const getfyEnvelope = {
+      event: 'pedido_pago',
+      event_label: 'Pedido pago',
+      payload: {
+        order: {
+          id: 90001,
+          status: 'completed',
+          amount: 197.0,
+          currency: 'BRL',
+          created_at: '2026-09-29T10:00:00Z'
+        },
+        customer: {
+          email: 'comprador@getfy.com.br',
+          phone: '5511999998888',
+          name: 'Comprador Getfy'
+        },
+        amount: 197.0,
+        status: 'paid',
+        paymentMethod: 'pix',
+        product: {
+          id: 'prod-abc',
+          name: 'Curso de Tráfego'
+        },
+        tracking: {
+          utm_source: 'instagram',
+          utm_medium: 'stories',
+          utm_campaign: 'lancamento_setembro',
+          src: 'instagram',
+          sck: 'lancamento_setembro'
+        }
+      }
+    }
+
+    const payload = getfyEnvelope.payload
+    const status = normalizeSaleStatus(getfyEnvelope.event, 'getfy')
+    const grossPrice = normalizeSaleAmount(payload, 'getfy')
+    const netPrice = normalizeNetAmount(payload, 'getfy', grossPrice)
+    const paymentMethod = normalizeSalePaymentMethod(payload, 'getfy')
+    const utms = normalizeSaleUtms(payload)
+
+    assert.equal(status, 'approved')
+    assert.equal(grossPrice, 197.0)
+    assert.equal(netPrice, 197.0)
+    assert.equal(paymentMethod, 'pix')
+    assert.equal(utms.utmSource, 'instagram')
+    assert.equal(utms.utmMedium, 'stories')
+    assert.equal(utms.utmCampaign, 'lancamento_setembro')
+  })
+
+  it('Getfy: Normalização de eventos de ciclo de vida (pendente, pix, cancelado, reembolso, assinatura)', async () => {
+    const { normalizeSaleStatus } = await import('../src/lib/integrations/normalizer')
+
+    assert.equal(normalizeSaleStatus('pedido_pago', 'getfy'), 'approved')
+    assert.equal(normalizeSaleStatus('assinatura_criada', 'getfy'), 'approved')
+    assert.equal(normalizeSaleStatus('assinatura_renovada', 'getfy'), 'approved')
+    assert.equal(normalizeSaleStatus('pedido_pendente', 'getfy'), 'pending')
+    assert.equal(normalizeSaleStatus('pix_gerado', 'getfy'), 'pending')
+    assert.equal(normalizeSaleStatus('boleto_gerado', 'getfy'), 'pending')
+    assert.equal(normalizeSaleStatus('pagamento_recusado', 'getfy'), 'cancelled')
+    assert.equal(normalizeSaleStatus('pedido_cancelado', 'getfy'), 'cancelled')
+    assert.equal(normalizeSaleStatus('assinatura_cancelada', 'getfy'), 'cancelled')
+    assert.equal(normalizeSaleStatus('reembolso', 'getfy'), 'refunded')
+  })
+
+  it('Getfy: Geração e unicidade de chave de idempotência', () => {
+    const orderId = '90001'
+    const status = 'approved'
+    const key1 = `getfy_${orderId}_${status}`
+    const key2 = `getfy_${orderId}_${status}`
+
+    assert.equal(key1, key2)
+    assert.equal(key1, 'getfy_90001_approved')
+  })
+
+  // Segurança de Webhooks (Kiwify e Hotmart)
+  it('Segurança Webhooks: Kiwify rejeita requisição sem token quando segredo está configurado', async () => {
+    const { POST: kiwifyPost } = await import('../src/app/api/webhooks/kiwify/route')
+    const originalSecret = process.env.KIWIFY_WEBHOOK_SECRET
+    process.env.KIWIFY_WEBHOOK_SECRET = 'super_secret_kiwify_123'
+
+    try {
+      // 1. Requisição SEM token
+      const reqNoToken = new Request('http://localhost/api/webhooks/kiwify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: 'kw_test_sec_1', order_status: 'paid' })
+      })
+      const resNoToken = await kiwifyPost(reqNoToken)
+      assert.equal(resNoToken.status, 401, 'Deve rejeitar com 401 quando token está ausente')
+
+      // 2. Requisição com token INCORRETO
+      const reqWrongToken = new Request('http://localhost/api/webhooks/kiwify?token=token_errado', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: 'kw_test_sec_2', order_status: 'paid' })
+      })
+      const resWrongToken = await kiwifyPost(reqWrongToken)
+      assert.equal(resWrongToken.status, 401, 'Deve rejeitar com 401 quando token é inválido')
+
+      // 3. Requisição com workspaceId INEXISTENTE
+      const reqInvalidWs = new Request('http://localhost/api/webhooks/kiwify?token=super_secret_kiwify_123&workspaceId=ws_fantasma_999', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: 'kw_test_sec_3', order_status: 'paid' })
+      })
+      const resInvalidWs = await kiwifyPost(reqInvalidWs)
+      assert.equal(resInvalidWs.status, 404, 'Deve rejeitar com 404 quando workspaceId não existe')
+    } finally {
+      process.env.KIWIFY_WEBHOOK_SECRET = originalSecret
+    }
+  })
+
+  it('Segurança Webhooks: Hotmart rejeita requisição sem hottok quando segredo está configurado', async () => {
+    const { POST: hotmartPost } = await import('../src/app/api/webhooks/hotmart/route')
+    const originalSecret = process.env.HOTMART_WEBHOOK_SECRET
+    process.env.HOTMART_WEBHOOK_SECRET = 'super_hottok_secret_456'
+
+    try {
+      // 1. Requisição SEM hottok
+      const reqNoHottok = new Request('http://localhost/api/webhooks/hotmart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'PURCHASE_APPROVED',
+          data: { purchase: { transaction: 'HP_SEC_1', price: { value: 100 } } }
+        })
+      })
+      const resNoHottok = await hotmartPost(reqNoHottok)
+      assert.equal(resNoHottok.status, 401, 'Deve rejeitar com 401 quando hottok está ausente')
+
+      // 2. Requisição com hottok INCORRETO
+      const reqWrongHottok = new Request('http://localhost/api/webhooks/hotmart', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-hotmart-hottok': 'hottok_errado'
+        },
+        body: JSON.stringify({
+          event: 'PURCHASE_APPROVED',
+          data: { purchase: { transaction: 'HP_SEC_2', price: { value: 100 } } }
+        })
+      })
+      const resWrongHottok = await hotmartPost(reqWrongHottok)
+      assert.equal(resWrongHottok.status, 401, 'Deve rejeitar com 401 quando hottok é inválido')
+    } finally {
+      process.env.HOTMART_WEBHOOK_SECRET = originalSecret
+    }
+  })
+
+  it('Segurança Webhooks: Segredo global NÃO autoriza workspace de cliente que possui segredo próprio ou workspace não-padrão', async () => {
+    const { authenticateWebhook } = await import('../src/lib/integrations/webhook-auth')
+    const { prisma } = await import('../src/lib/db')
+
+    // Criar workspace de cliente com segredo próprio
+    const clientWs = await prisma.workspace.create({
+      data: {
+        name: 'Client Workspace Isolated',
+        slug: `client-ws-${Date.now()}`
+      }
+    })
+
+    await prisma.integration.create({
+      data: {
+        workspaceId: clientWs.id,
+        platform: 'hotmart',
+        name: 'Hotmart Cliente',
+        webhookSecret: 'client_specific_secret_999'
+      }
+    })
+
+    try {
+      // 1. Tentar autenticar o workspace do cliente usando o segredo global de ambiente
+      const authWithGlobal = await authenticateWebhook({
+        platform: 'hotmart',
+        providedToken: 'global_env_secret_123',
+        queryWorkspaceId: clientWs.id,
+        globalEnvSecret: 'global_env_secret_123'
+      })
+
+      assert.equal(authWithGlobal.authorized, false, 'Segredo global NÃO deve autorizar workspace com segredo exclusivo')
+      assert.equal(authWithGlobal.status, 401)
+
+      // 2. Autenticar com o segredo exclusivo da integração do cliente
+      const authWithClientSecret = await authenticateWebhook({
+        platform: 'hotmart',
+        providedToken: 'client_specific_secret_999',
+        queryWorkspaceId: clientWs.id,
+        globalEnvSecret: 'global_env_secret_123'
+      })
+
+      assert.equal(authWithClientSecret.authorized, true, 'Segredo exclusivo da integração deve autorizar com sucesso')
+      assert.equal(authWithClientSecret.workspaceId, clientWs.id)
+
+      // 3. Autenticação direta pelo token sem queryWorkspaceId (procura por integração)
+      const authDirectToken = await authenticateWebhook({
+        platform: 'hotmart',
+        providedToken: 'client_specific_secret_999',
+        globalEnvSecret: 'global_env_secret_123'
+      })
+
+      assert.equal(authDirectToken.authorized, true)
+      assert.equal(authDirectToken.workspaceId, clientWs.id)
+    } finally {
+      await prisma.integration.deleteMany({ where: { workspaceId: clientWs.id } })
+      await prisma.workspace.delete({ where: { id: clientWs.id } })
+    }
+  })
 })
+
 

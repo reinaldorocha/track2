@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -306,6 +306,7 @@ model Pixel {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   events    TrackingEvent[]
+  products  Product[]
 
   @@unique([workspaceId, pixelId])
 }
@@ -358,6 +359,7 @@ model TrackingEvent {
   id              String   @id @default(cuid())
   workspaceId     String
   pixelId         String?
+  requestedPixelId String? // Meta Pixel ID numérico ou ID solicitado originalmente sem FK
   sessionId       String?
   eventId         String   @unique // for deduplication
   eventName       String   // PageView, Purchase, InitiateCheckout, etc.
@@ -367,11 +369,14 @@ model TrackingEvent {
   value           Float?
   currency        String?
   orderId         String?
+  platform        String?
   contentIds      String?  // JSON array
   contentType     String?
   // User data (hashed when sent to Meta)
   emailHash       String?
   phoneHash       String?
+  clientIp        String?
+  clientUserAgent String?
   fbclid          String?
   fbp             String?
   fbc             String?
@@ -379,8 +384,10 @@ model TrackingEvent {
   status          String   @default("received") // received, sent, failed
   capiResponse    String?  // JSON response from Meta CAPI
   capiError       String?
+  retryCount      Int      @default(0)
   sentAt          DateTime?
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   pixel     Pixel?          @relation(fields: [pixelId], references: [id])
@@ -432,6 +439,8 @@ model Sale {
   externalId      String   // Platform's order/transaction ID
   externalRef     String?  // Secondary reference (e.g., transaction ID)
   status          String   // approved, pending, refunded, chargeback, cancelled
+  paymentMethod   String?  // pix, card, boleto, etc.
+  installments    Int?     @default(1)
   // Financial
   grossAmount     Float    @default(0) // Revenue before fees
   netAmount       Float    @default(0) // After gateway fees
@@ -496,10 +505,12 @@ model Product {
   cost        Float?   @default(0) // Product cost (COGS)
   currency    String   @default("BRL")
   isActive    Boolean  @default(true)
+  pixelId     String?  // Meta Pixel especificamente vinculado a este produto
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  pixel     Pixel?     @relation(fields: [pixelId], references: [id], onDelete: SetNull)
   saleItems SaleItem[]
   fees      ProductFee[]
   taxes     ProductTax[]
@@ -628,7 +639,9 @@ model Fee {
   id           String   @id @default(cuid())
   workspaceId  String
   name         String
-  type         String   // gateway, checkout, platform, other
+  type           String   // gateway, checkout, platform, other
+  paymentMethod  String?  // pix, card_single, card_installments, boleto, all
+  installmentFee Float?   @default(0) // taxa adicional por parcela (%) para cartão parcelado
   percentage   Float    @default(0) // e.g., 3.99 for 3.99%
   fixedAmount  Float    @default(0) // fixed fee per transaction
   productId    String?
@@ -644,6 +657,7 @@ model Tax {
   id          String   @id @default(cuid())
   workspaceId String
   name        String
+  type        String   @default("sales") // sales (imposto s/ faturamento), meta_ads (imposto s/ anúncios Meta Ads / IOF)
   percentage  Float    // e.g., 6.0 for 6%
   productId   String?
   platform    String?

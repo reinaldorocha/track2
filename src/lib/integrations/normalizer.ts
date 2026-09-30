@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { attemptAttribution } from '@/lib/tracking/attribution'
+import { dispatchPurchaseToCapi } from '@/lib/meta/capi-service'
 
 export interface InternalSale {
   workspaceId: string
@@ -7,6 +8,8 @@ export interface InternalSale {
   externalId: string
   externalRef?: string
   status: 'approved' | 'pending' | 'refunded' | 'chargeback' | 'cancelled'
+  paymentMethod?: string
+  installments?: number
   grossAmount: number
   netAmount: number
   currency: string
@@ -20,6 +23,9 @@ export interface InternalSale {
   fbc?: string
   sessionId?: string
   customerEmail?: string
+  customerPhone?: string
+  clientIp?: string
+  clientUserAgent?: string
   orderedAt: Date
   approvedAt?: Date
   refundedAt?: Date
@@ -197,8 +203,8 @@ export async function purgeTestSales(workspaceId?: string): Promise<number> {
     })
 
     const testSaleIds = candidateSales
-      .filter((sale: any) => isTestSaleRecord(sale))
-      .map((sale: any) => sale.id)
+      .filter(sale => isTestSaleRecord(sale))
+      .map(sale => sale.id)
 
     if (testSaleIds.length > 0) {
       await prisma.sale.deleteMany({
@@ -234,6 +240,23 @@ export function normalizeSaleAmount(payload: Record<string, unknown>, provider =
     rawVal = priceObj.value ?? origObj.value ?? fullObj.value ?? purchase.price ?? purchase.original_offer_price
   } else if (pLower.includes('cakto') || pLower.includes('cacto')) {
     rawVal = payload.amount ?? data.amount ?? data.price ?? data.total ?? payload.value ?? payload.price
+  } else if (pLower.includes('getfy')) {
+    const order = (payload.order as Record<string, unknown>) || {}
+    const offer = (payload.offer as Record<string, unknown>) || {}
+    rawVal = payload.amount ?? order.amount ?? offer.price ?? payload.total ?? payload.value
+  } else if (pLower.includes('kiwify')) {
+    const commissions = (payload.Commissions as Record<string, unknown>) || {}
+    const order = (payload.Order as Record<string, unknown>) || {}
+    rawVal =
+      commissions.charge_amount ??
+      payload.order_amount ??
+      order.order_total ??
+      payload.charge_amount ??
+      payload.amount ??
+      payload.price
+    if (typeof rawVal === 'number' && rawVal > 500 && rawVal % 1 === 0 && commissions.charge_amount !== undefined) {
+      rawVal = rawVal / 100
+    }
   } else if (pLower.includes('yampi')) {
     rawVal = resource.value ?? resource.total ?? payload.value ?? payload.total
   } else if (pLower.includes('shopify')) {
@@ -302,6 +325,15 @@ export function normalizeNetAmount(
     netVal = commissionObj.value ?? purchase.commission
   } else if (pLower.includes('cakto') || pLower.includes('cacto')) {
     netVal = payload.net_amount ?? data.net_amount ?? data.liquid_amount ?? payload.liquid_amount
+  } else if (pLower.includes('getfy')) {
+    const order = (payload.order as Record<string, unknown>) || {}
+    netVal = payload.net_amount ?? payload.netAmount ?? payload.liquid_amount ?? order.net_amount
+  } else if (pLower.includes('kiwify')) {
+    const commissions = (payload.Commissions as Record<string, unknown>) || {}
+    netVal = commissions.my_commission ?? payload.net_amount ?? payload.commission
+    if (typeof netVal === 'number' && netVal > 500 && netVal % 1 === 0 && commissions.my_commission !== undefined) {
+      netVal = netVal / 100
+    }
   } else if (pLower.includes('yampi')) {
     netVal = resource.net_value ?? resource.liquid_value ?? payload.net_value
   } else if (pLower.includes('shopify')) {
@@ -347,6 +379,9 @@ export function normalizeSaleStatus(
     s === 'pago' ||
     s === 'aprovado' ||
     s === 'switch_plan' ||
+    s === 'pedido_pago' ||
+    s === 'assinatura_criada' ||
+    s === 'assinatura_renovada' ||
     s.includes('approved') ||
     s.includes('paid')
   ) {
@@ -360,6 +395,7 @@ export function normalizeSaleStatus(
     s === 'reembolsado' ||
     s === 'estornado' ||
     s === 'devolvido' ||
+    s === 'reembolso' ||
     s.includes('refund')
   ) {
     return 'refunded'
@@ -369,9 +405,11 @@ export function normalizeSaleStatus(
     s === 'purchase_chargeback' ||
     s === 'purchase_protest' ||
     s === 'chargeback' ||
+    s === 'chargedback' ||
     s === 'dispute' ||
     s === 'contestacao' ||
     s.includes('chargeback') ||
+    s.includes('chargedback') ||
     s.includes('protest')
   ) {
     return 'chargeback'
@@ -388,6 +426,9 @@ export function normalizeSaleStatus(
     s === 'falhado' ||
     s === 'failed' ||
     s === 'expired' ||
+    s === 'pedido_cancelado' ||
+    s === 'pagamento_recusado' ||
+    s === 'assinatura_cancelada' ||
     s.includes('cancel') ||
     s.includes('refused') ||
     s.includes('expired')
@@ -410,6 +451,8 @@ export function normalizeSalePaymentMethod(payload: Record<string, unknown>, _pr
   const resource = (payload.resource as Record<string, unknown>) || {}
 
   const rawType = String(
+    payload.paymentMethod ||
+    payment.method ||
     payment.type ||
     payload.payment_method ||
     payload.payment_type ||
@@ -425,6 +468,37 @@ export function normalizeSalePaymentMethod(payload: Record<string, unknown>, _pr
   if (rawType.includes('card') || rawType.includes('cartao') || rawType.includes('credito') || rawType.includes('debito')) return 'card'
 
   return rawType || 'card'
+}
+
+/**
+ * Normaliza número de parcelas da venda
+ */
+export function normalizeSaleInstallments(payload: Record<string, unknown>, _provider = 'generic'): number {
+  if (!payload) return 1
+
+  const data = (payload.data as Record<string, unknown>) || {}
+  const purchase = (data.purchase as Record<string, unknown>) || (payload.purchase as Record<string, unknown>) || {}
+  const payment = (purchase.payment as Record<string, unknown>) || (payload.payment as Record<string, unknown>) || {}
+  const resource = (payload.resource as Record<string, unknown>) || {}
+  const order = (payload.order as Record<string, unknown>) || (payload.Order as Record<string, unknown>) || {}
+
+  const rawInstallments =
+    payload.installments ??
+    data.installments ??
+    purchase.installments_number ??
+    purchase.recurrence_number ??
+    payment.installments_number ??
+    payment.installments ??
+    order.installments ??
+    resource.installments ??
+    payload.order_installments
+
+  if (rawInstallments !== undefined && rawInstallments !== null) {
+    const parsed = parseInt(String(rawInstallments), 10)
+    if (!isNaN(parsed) && parsed > 0) return parsed
+  }
+
+  return 1
 }
 
 /**
@@ -445,7 +519,9 @@ export function normalizeSaleUtms(payload: Record<string, unknown>): {
 
   const data = (payload.data as Record<string, unknown>) || {}
   const purchase = (data.purchase as Record<string, unknown>) || (payload.purchase as Record<string, unknown>) || {}
-  const tracking = (purchase.tracking as Record<string, unknown>) || (payload.tracking as Record<string, unknown>) || (payload.utms as Record<string, unknown>) || (payload.utm as Record<string, unknown>) || (data.utms as Record<string, unknown>) || {}
+  const kiwifyTracking = (payload.TrackingParameters as Record<string, unknown>) || (payload.tracking_parameters as Record<string, unknown>) || {}
+  const baseTracking = (purchase.tracking as Record<string, unknown>) || (payload.tracking as Record<string, unknown>) || (data.tracking as Record<string, unknown>) || (payload.utms as Record<string, unknown>) || (payload.utm as Record<string, unknown>) || (data.utms as Record<string, unknown>) || {}
+  const tracking = { ...kiwifyTracking, ...baseTracking }
   const noteAttributes = (payload.note_attributes as Array<{ name: string; value: string }>) || []
 
   const getAttr = (name: string): string | undefined => {
@@ -467,6 +543,27 @@ export function normalizeSaleUtms(payload: Record<string, unknown>): {
 }
 
 export async function upsertSale(sale: InternalSale) {
+  // Hidratar UTMs e identificadores a partir da TrackingSession correspondente daquela sessão
+  if (sale.sessionId && (!sale.utmSource || !sale.utmCampaign)) {
+    try {
+      const session = await prisma.trackingSession.findFirst({
+        where: { sessionId: sale.sessionId, workspaceId: sale.workspaceId }
+      })
+      if (session) {
+        sale.utmSource = sale.utmSource || session.utmSource || undefined
+        sale.utmMedium = sale.utmMedium || session.utmMedium || undefined
+        sale.utmCampaign = sale.utmCampaign || session.utmCampaign || undefined
+        sale.utmContent = sale.utmContent || session.utmContent || undefined
+        sale.utmTerm = sale.utmTerm || session.utmTerm || undefined
+        sale.fbclid = sale.fbclid || session.fbclid || undefined
+        sale.fbp = sale.fbp || session.fbp || undefined
+        sale.fbc = sale.fbc || session.fbc || undefined
+      }
+    } catch (e) {
+      console.error('[upsertSale] Error hydrating UTMs from TrackingSession:', e)
+    }
+  }
+
   const result = await prisma.sale.upsert({
     where: { 
       workspaceId_platform_externalId: { 
@@ -479,7 +576,9 @@ export async function upsertSale(sale: InternalSale) {
       workspaceId: sale.workspaceId,
       platform: sale.platform,
       externalId: sale.externalId,
-      externalRef: sale.externalRef,
+      externalRef: sale.externalRef || sale.paymentMethod,
+      paymentMethod: sale.paymentMethod || sale.externalRef || 'card',
+      installments: sale.installments || 1,
       status: sale.status,
       grossAmount: sale.grossAmount,
       netAmount: sale.netAmount,
@@ -494,12 +593,14 @@ export async function upsertSale(sale: InternalSale) {
       fbp: sale.fbp,
       fbc: sale.fbc,
       sessionId: sale.sessionId,
-      orderedAt: sale.orderedAt,
+      orderedAt: sale.orderedAt || new Date(),
       approvedAt: sale.approvedAt,
       refundedAt: sale.refundedAt
     },
     update: { 
       status: sale.status, 
+      paymentMethod: sale.paymentMethod || sale.externalRef || undefined,
+      installments: sale.installments || undefined,
       grossAmount: sale.grossAmount,
       netAmount: sale.netAmount,
       currency: sale.currency,
@@ -519,9 +620,9 @@ export async function upsertSale(sale: InternalSale) {
   })
 
   // Upsert de Produto e SaleItem quando informados
+  let resolvedProductId: string | undefined = undefined
   if (sale.productInfo?.name) {
     try {
-      let productId: string | undefined
       if (sale.productInfo.id) {
         const extProdId = String(sale.productInfo.id)
         let product = await prisma.product.findFirst({
@@ -555,7 +656,7 @@ export async function upsertSale(sale: InternalSale) {
             }
           })
         }
-        productId = product.id
+        resolvedProductId = product.id
       }
 
       const existingItem = await prisma.saleItem.findFirst({
@@ -565,7 +666,7 @@ export async function upsertSale(sale: InternalSale) {
         await prisma.saleItem.create({
           data: {
             saleId: result.id,
-            productId,
+            productId: resolvedProductId,
             externalProductId: sale.productInfo.id ? String(sale.productInfo.id) : undefined,
             name: String(sale.productInfo.name),
             sku: sale.productInfo.sku,
@@ -586,6 +687,41 @@ export async function upsertSale(sale: InternalSale) {
   } catch (e) { 
     console.error('[upsertSale] Attribution error:', e) 
   }
+
+  // Disparo automático para Meta Conversions API (CAPI) em vendas aprovadas
+  let capiResult: { sent: boolean; success?: boolean; reason?: string; error?: string; pixelId?: string; result?: unknown; skipped?: boolean } | undefined = undefined
+  if (result.status === 'approved') {
+    try {
+      capiResult = await dispatchPurchaseToCapi({
+        workspaceId: result.workspaceId,
+        saleId: result.id,
+        externalId: result.externalId,
+        grossAmount: result.grossAmount,
+        currency: result.currency,
+        customerEmail: result.customerEmail || undefined,
+        customerPhone: sale.customerPhone,
+        fbp: result.fbp || undefined,
+        fbc: result.fbc || undefined,
+        sessionId: result.sessionId || undefined,
+        approvedAt: result.approvedAt || new Date(),
+        productId: resolvedProductId || undefined,
+        clientIp: sale.clientIp,
+        clientUserAgent: sale.clientUserAgent,
+        platform: result.platform
+      })
+      if (capiResult?.skipped) {
+        console.log(`[upsertSale] CAPI Purchase skipped for sale ${result.id} (${capiResult.reason}).`)
+      } else if (!capiResult?.sent || !capiResult?.success) {
+        console.warn(`[upsertSale] CAPI Purchase not delivered immediately for sale ${result.id}: ${capiResult?.reason || capiResult?.error || 'delivery failed'}. Queued in TrackingEvent with status 'failed' for retry.`)
+      }
+    } catch (e) {
+      console.error('[upsertSale] CAPI Purchase trigger error:', e)
+      capiResult = { sent: false, success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
   
-  return result
+  return {
+    ...result,
+    capiResult
+  }
 }
