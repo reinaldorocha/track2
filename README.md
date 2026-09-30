@@ -112,6 +112,38 @@ No Vercel, configure também `CRON_SECRET` para os agendamentos da Meta.
 
 ---
 
+## 🐳 Deploy Automatizado na VPS (Docker + Nginx Proxy Manager)
+
+Instalação **100% automatizada** em VPS com Docker. O script descobre o banco PostgreSQL (`stack-postgres`), obtém usuário e senha, cria o banco de dados `utmtrack`, gera as chaves de segurança e inicia o container na porta **3030**.
+
+### 1. Clonar e Instalar na VPS (Comando Único)
+Execute no terminal da sua VPS:
+```bash
+git clone -b melhorias https://github.com/reinaldorocha/track2.git /root/utm-track && cd /root/utm-track && chmod +x install.sh update.sh && ./install.sh
+```
+> O instalador pedirá **apenas o domínio da aplicação** (ex: `track.seudominio.com.br`). Todo o resto é configurado sozinho!
+
+### 2. Configurar no Nginx Proxy Manager (NPM)
+1. Acesse o painel web do **Nginx Proxy Manager** (porta 81).
+2. Vá em **Proxy Hosts** ➔ **Add Proxy Host**:
+   - **Domain Names**: `track.seudominio.com.br`
+   - **Scheme**: `http`
+   - **Forward Hostname / IP**: `utm-track-app`
+   - **Forward Port**: `3000`
+   - Ative: **Block Common Exploits** e **Websockets Support**
+3. Na aba **SSL**:
+   - Selecione: **Request a new SSL Certificate**
+   - Ative: **Force SSL** e concorde com os termos do Let's Encrypt
+4. Clique em **Save**.
+
+### 3. Atualizações Futuras (1 Comando)
+Sempre que enviar atualizações para o Git, rode na pasta da VPS:
+```bash
+cd /root/utm-track && ./update.sh
+```
+
+---
+
 ## 🧪 Testes Automatizados
 
 O projeto conta com suite de testes completa validando todas as regras de negócio:
