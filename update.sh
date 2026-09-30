@@ -44,8 +44,8 @@ fi
 # 3. Baixar atualizações do repositório Git
 echo -e "${YELLOW}>> 1. Baixando novidades do repositório Git...${NC}"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-echo -e "Branch atual: ${CYAN}${CURRENT_BRANCH}${NC}"
-git pull origin "$CURRENT_BRANCH"
+git fetch origin "$CURRENT_BRANCH"
+git reset --hard "origin/$CURRENT_BRANCH"
 
 # 4. Reconstruir imagem Docker com as alterações
 echo -e "\n${YELLOW}>> 2. Reconstruindo a imagem Docker com as novas alterações...${NC}"
