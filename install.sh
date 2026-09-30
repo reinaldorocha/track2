@@ -118,16 +118,12 @@ $DOCKER_COMPOSE_CMD build
 
 echo -e "\n${YELLOW}>> 4. Sincronizando tabelas no PostgreSQL (Prisma db push)...${NC}"
 # Executa prisma db push dentro do container temporário
-if ! $DOCKER_COMPOSE_CMD run --rm utm-track npx prisma db push; then
+if ! $DOCKER_COMPOSE_CMD run --rm utm-track sh -c 'grep -q "provider = \"postgresql\"" prisma/schema.prisma && npx prisma db push'; then
     echo -e "${RED}[AVISO] Falha ao conectar no PostgreSQL.${NC}"
     echo -e "Certifique-se de que:"
     echo -e "1. O banco de dados e usuário existem: ${CYAN}CREATE DATABASE utmtrack;${NC}"
     echo -e "2. O PostgreSQL aceita conexões da rede Docker no ${CYAN}/etc/postgresql/*/main/pg_hba.conf${NC}"
-    echo -e "Deseja continuar e tentar subir o container mesmo assim? (s/N): "
-    read -r CONT
-    if [[ ! "$CONT" =~ ^[Ss]$ ]]; then
-        exit 1
-    fi
+    exit 1
 fi
 
 # 5. Iniciar container

@@ -11,6 +11,7 @@ import {
 } from '@/lib/integrations/normalizer'
 import { createSaleNotification, SaleNotificationType } from '@/lib/notifications/service'
 import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
+import { claimWebhookEvent } from '@/lib/integrations/webhook-event'
 
 export async function POST(req: Request) {
   let webhookEventId: string | null = null
@@ -49,7 +50,11 @@ export async function POST(req: Request) {
     const customer = (envelopePayload.customer as Record<string, unknown>) || {}
     const product = (envelopePayload.product as Record<string, unknown>) || (envelopePayload.offer as Record<string, unknown>) || {}
 
-    const orderId = String(order.id || envelopePayload.order_id || envelopePayload.orderId || envelopePayload.id || `GETFY_${Date.now()}`)
+    const rawOrderId = order.id || envelopePayload.order_id || envelopePayload.orderId || envelopePayload.id
+    if (rawOrderId === undefined || rawOrderId === null || !String(rawOrderId).trim()) {
+      return NextResponse.json({ error: 'Missing order ID' }, { status: 400 })
+    }
+    const orderId = String(rawOrderId).trim()
 
     const status = normalizeSaleStatus(event, 'getfy')
     const grossPrice = normalizeSaleAmount(envelopePayload, 'getfy')
@@ -58,31 +63,18 @@ export async function POST(req: Request) {
     const utms = normalizeSaleUtms(envelopePayload)
     const currency = String(order.currency || envelopePayload.currency || 'BRL')
 
-    const idempotencyKey = `getfy_${orderId}_${status}`
-    const existingWebhook = await prisma.webhookEvent.findUnique({
-      where: { idempotencyKey }
+    const idempotencyKey = `getfy_${workspaceId}_${orderId}_${status}`
+    const claim = await claimWebhookEvent({
+      idempotencyKey, workspaceId, source: 'getfy', eventType: event, payload: rawBody
     })
-
-    if (existingWebhook && existingWebhook.status === 'processed') {
-      return NextResponse.json({ success: true, message: 'Already processed (idempotent)', idempotencyKey })
+    if (!claim.claimed) {
+      return NextResponse.json({
+        success: true,
+        message: claim.status === 'processed' ? 'Already processed' : 'Already processing',
+        idempotencyKey
+      }, { status: claim.status === 'processed' ? 200 : 202 })
     }
-
-    const webhookEvent = await prisma.webhookEvent.upsert({
-      where: { idempotencyKey },
-      create: {
-        idempotencyKey,
-        workspaceId,
-        source: 'getfy',
-        eventType: event,
-        status: 'processing',
-        payload: JSON.stringify(rawBody)
-      },
-      update: {
-        status: 'processing',
-        receivedAt: new Date()
-      }
-    })
-    webhookEventId = webhookEvent.id
+    webhookEventId = claim.eventId
 
     const email = (customer.email || order.email || envelopePayload.email)
       ? String(customer.email || order.email || envelopePayload.email)
@@ -126,7 +118,7 @@ export async function POST(req: Request) {
     })
 
     await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
+      where: { id: claim.eventId },
       data: {
         status: 'processed',
         processedAt: new Date(),

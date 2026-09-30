@@ -2,9 +2,26 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { getUserWorkspaceId } from '@/lib/workspace'
 import { getAutoSyncStatus, triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
+import { prisma } from '@/lib/db'
+
+export const maxDuration = 300
 
 export async function GET(req: Request) {
   try {
+    const cronSecret = process.env.CRON_SECRET
+    if (cronSecret && req.headers.get('authorization') === `Bearer ${cronSecret}`) {
+      const accounts = await prisma.adAccount.findMany({
+        where: { status: 'active' },
+        select: { workspaceId: true },
+        distinct: ['workspaceId'],
+      })
+      const results = []
+      for (const account of accounts) {
+        results.push({ workspaceId: account.workspaceId, ...await triggerBackgroundMetaSyncIfNeeded(account.workspaceId, 15) })
+      }
+      const success = results.every((result) => result.reason !== 'sync_failed' && result.reason !== 'internal_error')
+      return NextResponse.json({ success, results }, { status: success ? 200 : 500 })
+    }
     const session = await auth()
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -30,7 +47,7 @@ export async function GET(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST() {
   try {
     const session = await auth()
     if (!session?.user?.id) {

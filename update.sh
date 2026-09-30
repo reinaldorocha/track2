@@ -35,6 +35,12 @@ if [ ! -f ".env.production" ]; then
     exit 1
 fi
 
+# Esta rotina atualiza a instalação PostgreSQL da VPS.
+if ! grep -Eq '^DATABASE_URL="?postgres(ql)?://' .env.production; then
+    echo -e "${RED}[ERRO] .env.production deve apontar para PostgreSQL.${NC}"
+    exit 1
+fi
+
 # 3. Baixar atualizações do repositório Git
 echo -e "${YELLOW}>> 1. Baixando novidades do repositório Git...${NC}"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
@@ -47,7 +53,7 @@ $DOCKER_COMPOSE_CMD build
 
 # 5. Aplicar atualizações de schema no PostgreSQL
 echo -e "\n${YELLOW}>> 3. Aplicando atualizações de banco de dados (Prisma db push)...${NC}"
-$DOCKER_COMPOSE_CMD run --rm utm-track npx prisma db push
+$DOCKER_COMPOSE_CMD run --rm utm-track sh -c 'grep -q "provider = \"postgresql\"" prisma/schema.prisma && npx prisma db push'
 
 # 6. Reiniciar container com a nova versão
 echo -e "\n${YELLOW}>> 4. Reiniciando a aplicação (zero-downtime)...${NC}"

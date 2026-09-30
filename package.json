@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
-    "vercel-build": "prisma generate && next build",
-    "postinstall": "prisma generate",
+    "build": "node scripts/switch-database.js detect && prisma generate && next build",
+    "vercel-build": "node scripts/switch-database.js postgres && prisma generate && next build",
+    "postinstall": "node scripts/switch-database.js detect && prisma generate",
     "start": "next start",
     "lint": "eslint",
     "db:push": "prisma db push",

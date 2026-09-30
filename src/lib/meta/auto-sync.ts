@@ -1,4 +1,4 @@
-﻿import { prisma } from '@/lib/db'
+import { prisma } from '@/lib/db'
 import { syncAdAccount } from './sync'
 
 export interface AutoSyncStatus {
@@ -113,22 +113,12 @@ export async function triggerBackgroundMetaSyncIfNeeded(
 
     const accountIdsToSync = staleAccounts.map((a) => a.id)
 
-    // Disparar sincronizaÃ§Ã£o assÃ­ncrona em background (fire and forget)
-    // NÃ£o bloqueia a requisiÃ§Ã£o HTTP atual
-    Promise.resolve().then(async () => {
-      console.log(`[Auto-Sync Meta Ads] Iniciando sync em background para ${staleAccounts.length} conta(s)...`)
-      for (const acc of staleAccounts) {
-        try {
-          await syncAdAccount(workspaceId, acc.id)
-          console.log(`[Auto-Sync Meta Ads] SincronizaÃ§Ã£o da conta '${acc.name}' concluÃ­da com sucesso.`)
-        } catch (err) {
-          console.error(`[Auto-Sync Meta Ads] Erro ao sincronizar conta '${acc.name}':`, err)
-        }
-      }
-    }).catch((e) => {
-      console.error('[Auto-Sync Meta Ads] Erro inesperado na Promise em background:', e)
-    })
-
+    const results = await Promise.allSettled(staleAccounts.map((acc) => syncAdAccount(workspaceId, acc.id)))
+    const failed = results.filter((result) => result.status === 'rejected' || !result.value.success)
+    if (failed.length) {
+      console.error(`[Auto-Sync Meta Ads] Falha em ${failed.length} de ${staleAccounts.length} conta(s)`)
+      return { triggered: false, reason: 'sync_failed', accountIds: accountIdsToSync }
+    }
     return {
       triggered: true,
       accountIds: accountIdsToSync,

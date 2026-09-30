@@ -11,6 +11,7 @@ import {
 } from '@/lib/integrations/normalizer'
 import { createSaleNotification, SaleNotificationType } from '@/lib/notifications/service'
 import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
+import { claimWebhookEvent } from '@/lib/integrations/webhook-event'
 
 export async function POST(req: Request) {
   let webhookEventId: string | null = null
@@ -37,7 +38,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 })
     }
 
-    const orderId = String(payload.order_id || payload.orderId || payload.id || `KIWIFY_${Date.now()}`)
+    const rawOrderId = payload.order_id || payload.orderId || payload.id
+    if (rawOrderId === undefined || rawOrderId === null || !String(rawOrderId).trim()) {
+      return NextResponse.json({ error: 'Missing order ID' }, { status: 400 })
+    }
+    const orderId = String(rawOrderId).trim()
     const rawStatus = String(payload.order_status || payload.status || 'paid')
 
     const status = normalizeSaleStatus(rawStatus, 'kiwify')
@@ -46,31 +51,18 @@ export async function POST(req: Request) {
     const paymentMethod = normalizeSalePaymentMethod(payload, 'kiwify')
     const utms = normalizeSaleUtms(payload)
 
-    const idempotencyKey = `kiwify_${orderId}_${status}`
-    const existingWebhook = await prisma.webhookEvent.findUnique({
-      where: { idempotencyKey }
+    const idempotencyKey = `kiwify_${workspaceId}_${orderId}_${status}`
+    const claim = await claimWebhookEvent({
+      idempotencyKey, workspaceId, source: 'kiwify', eventType: rawStatus, payload
     })
-
-    if (existingWebhook && existingWebhook.status === 'processed') {
-      return NextResponse.json({ success: true, message: 'Already processed (idempotent)', idempotencyKey })
+    if (!claim.claimed) {
+      return NextResponse.json({
+        success: true,
+        message: claim.status === 'processed' ? 'Already processed' : 'Already processing',
+        idempotencyKey
+      }, { status: claim.status === 'processed' ? 200 : 202 })
     }
-
-    const webhookEvent = await prisma.webhookEvent.upsert({
-      where: { idempotencyKey },
-      create: {
-        idempotencyKey,
-        workspaceId,
-        source: 'kiwify',
-        eventType: rawStatus,
-        status: 'processing',
-        payload: JSON.stringify(payload)
-      },
-      update: {
-        status: 'processing',
-        receivedAt: new Date()
-      }
-    })
-    webhookEventId = webhookEvent.id
+    webhookEventId = claim.eventId
 
     const customer = (payload.Customer as Record<string, unknown>) || (payload.customer as Record<string, unknown>) || {}
     const product = (payload.Product as Record<string, unknown>) || (payload.product as Record<string, unknown>) || {}
@@ -112,7 +104,7 @@ export async function POST(req: Request) {
     })
 
     await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
+      where: { id: claim.eventId },
       data: {
         status: 'processed',
         processedAt: new Date(),

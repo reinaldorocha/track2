@@ -8,6 +8,7 @@ import {
 } from '@/lib/metrics'
 import { calculateFinancialMetrics } from '@/lib/calculations/financial-engine'
 import { triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
+import { after } from 'next/server'
 
 export async function GET(req: Request) {
   try {
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
     await purgeTestSales(workspaceId)
 
     // Disparo não-bloqueante de auto-sync em background para manter métricas de Meta Ads atualizadas
-    triggerBackgroundMetaSyncIfNeeded(workspaceId, 15).catch(() => {})
+    after(() => triggerBackgroundMetaSyncIfNeeded(workspaceId, 15).then(() => {}))
 
     // 1. Consultar Vendas Reais do Período
     const allSales = await prisma.sale.findMany({

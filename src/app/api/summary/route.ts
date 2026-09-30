@@ -9,6 +9,7 @@ import {
 } from '@/lib/metrics'
 import { calculateFinancialMetrics, calculateSaleFee } from '@/lib/calculations/financial-engine'
 import { triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
+import { after } from 'next/server'
 
 export async function GET(req: Request) {
   try {
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
     await purgeTestSales(workspaceId)
 
     // Disparo em background de auto-sync de gastos Meta Ads
-    triggerBackgroundMetaSyncIfNeeded(workspaceId, 15).catch(() => {})
+    after(() => triggerBackgroundMetaSyncIfNeeded(workspaceId, 15).then(() => {}))
 
     const { searchParams } = new URL(req.url)
     const fromStr = searchParams.get('from')

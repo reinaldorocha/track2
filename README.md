@@ -101,6 +101,15 @@ npm run dev
 ```
 Acesse em: [http://localhost:3000](http://localhost:3000)
 
+### Banco de dados em produção
+
+O desenvolvimento local usa `DATABASE_URL=file:./dev.db` (SQLite). O build escolhe o
+provider pelo `DATABASE_URL`; no Vercel e na instalação Docker a URL deve apontar
+para PostgreSQL. Antes de subir uma versão que altera o schema, aplique
+`node scripts/switch-database.js postgres && npx prisma db push` com o provider PostgreSQL. Os scripts `install.sh` e
+`update.sh` já fazem essa etapa e interrompem a implantação se ela falhar.
+No Vercel, configure também `CRON_SECRET` para os agendamentos da Meta.
+
 ---
 
 ## 🧪 Testes Automatizados

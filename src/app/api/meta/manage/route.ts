@@ -6,199 +6,109 @@ import { decrypt } from '@/lib/encryption'
 import { MetaApiClient } from '@/lib/meta/client'
 
 export async function PATCH(req: Request) {
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceId = await getUserWorkspaceId(session.user.id)
+  if (!workspaceId) return NextResponse.json({ error: 'No workspace' }, { status: 404 })
+
   try {
-    const session = await auth()
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { level, id, ids, status, name, budget, budgetChangePercent } = await req.json()
+    const targetIds: string[] = Array.isArray(ids) && ids.length ? ids : id ? [id] : []
+    if (!['campaign', 'adset', 'ad'].includes(level) || !targetIds.length || targetIds.some((value) => typeof value !== 'string')) {
+      return NextResponse.json({ error: 'Informe nível e IDs válidos' }, { status: 400 })
+    }
+    if (status !== undefined && !['ACTIVE', 'PAUSED'].includes(String(status).toUpperCase())) {
+      return NextResponse.json({ error: 'Status inválido' }, { status: 400 })
+    }
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+      return NextResponse.json({ error: 'Nome inválido' }, { status: 400 })
+    }
+    if (level === 'ad' && (budget !== undefined || budgetChangePercent !== undefined)) {
+      return NextResponse.json({ error: 'Anúncios não aceitam orçamento diário' }, { status: 400 })
+    }
+    if ([budget, budgetChangePercent].some((value) => value !== undefined && (value === null || !Number.isFinite(Number(value))))) {
+      return NextResponse.json({ error: 'Orçamento inválido' }, { status: 400 })
     }
 
-    const workspaceId = await getUserWorkspaceId(session.user.id)
-    if (!workspaceId) {
-      return NextResponse.json({ error: 'No workspace' }, { status: 404 })
-    }
-
-    const body = await req.json()
-    const {
-      level, // 'campaign' | 'adset' | 'ad'
-      id,
-      ids, // Para ações em massa
-      status, // 'ACTIVE' | 'PAUSED'
-      name,
-      budget, // em R$ (ex: 150.00)
-      budgetChangePercent, // Para escala percentual em massa (ex: +20 ou -20)
-    } = body
-
-    if (!level || (!id && (!ids || !ids.length))) {
-      return NextResponse.json({ error: 'Parâmetros inválidos. Informe level e id(s)' }, { status: 400 })
-    }
-
-    const targetIds: string[] = ids && Array.isArray(ids) && ids.length > 0 ? ids : [id]
-    const updatedItems: any[] = []
-
+    const updatedItems: unknown[] = []
+    const failures: { id: string; error: string }[] = []
     for (const targetId of targetIds) {
-      if (level === 'campaign') {
-        const campaign = await prisma.campaign.findFirst({
-          where: {
-            workspaceId,
-            OR: [{ id: targetId }, { externalId: targetId }],
-          },
-          include: { adAccount: true },
-        })
-
-        if (!campaign) continue
-
-        let newBudget = campaign.dailyBudget
-        if (budget !== undefined) {
-          newBudget = Number(budget)
-        } else if (budgetChangePercent !== undefined && campaign.dailyBudget) {
-          newBudget = Math.max(1, Math.round(campaign.dailyBudget * (1 + Number(budgetChangePercent) / 100)))
+      try {
+        if (level === 'campaign') {
+          const item = await prisma.campaign.findFirst({ where: { workspaceId, OR: [{ id: targetId }, { externalId: targetId }] }, include: { adAccount: true } })
+          if (!item) throw new Error('Campanha não encontrada')
+          if (!item.adAccount.accessTokenEnc) throw new Error('Conta Meta sem token')
+          const dailyBudget = resolveBudget(item.dailyBudget, budget, budgetChangePercent)
+          const payload = makePayload(status, name, dailyBudget)
+          if (!Object.keys(payload).length) throw new Error('Nenhuma alteração informada')
+          const result = await new MetaApiClient(decrypt(item.adAccount.accessTokenEnc)).updateCampaign(item.externalId, payload)
+          if (!result.success) throw new Error('Meta não confirmou a atualização')
+          updatedItems.push(await prisma.campaign.update({ where: { id: item.id }, data: localChanges(status, name, dailyBudget) }))
+        } else if (level === 'adset') {
+          const item = await prisma.adSet.findFirst({ where: { workspaceId, OR: [{ id: targetId }, { externalId: targetId }] }, include: { campaign: { include: { adAccount: true } } } })
+          if (!item) throw new Error('Conjunto não encontrado')
+          const token = item.campaign.adAccount.accessTokenEnc
+          if (!token) throw new Error('Conta Meta sem token')
+          const dailyBudget = resolveBudget(item.dailyBudget, budget, budgetChangePercent)
+          const payload = makePayload(status, name, dailyBudget)
+          if (!Object.keys(payload).length) throw new Error('Nenhuma alteração informada')
+          const result = await new MetaApiClient(decrypt(token)).updateAdSet(item.externalId, payload)
+          if (!result.success) throw new Error('Meta não confirmou a atualização')
+          updatedItems.push(await prisma.adSet.update({ where: { id: item.id }, data: localChanges(status, name, dailyBudget) }))
+        } else {
+          const item = await prisma.ad.findFirst({ where: { workspaceId, OR: [{ id: targetId }, { externalId: targetId }] }, include: { adSet: { include: { campaign: { include: { adAccount: true } } } } } })
+          if (!item) throw new Error('Anúncio não encontrado')
+          const token = item.adSet.campaign.adAccount.accessTokenEnc
+          if (!token) throw new Error('Conta Meta sem token')
+          const payload = makePayload(status, name)
+          if (!Object.keys(payload).length) throw new Error('Nenhuma alteração informada')
+          const result = await new MetaApiClient(decrypt(token)).updateAd(item.externalId, payload)
+          if (!result.success) throw new Error('Meta não confirmou a atualização')
+          updatedItems.push(await prisma.ad.update({ where: { id: item.id }, data: localChanges(status, name) }))
         }
-
-        const updateData: any = { updatedAt: new Date() }
-        if (status) updateData.status = status.toUpperCase()
-        if (name) updateData.name = name
-        if (newBudget !== undefined) updateData.dailyBudget = newBudget
-
-        // Atualizar banco local
-        const updated = await prisma.campaign.update({
-          where: { id: campaign.id },
-          data: updateData,
-        })
-
-        // Atualizar na Meta Marketing API
-        if (campaign.adAccount?.accessTokenEnc) {
-          try {
-            const token = decrypt(campaign.adAccount.accessTokenEnc)
-            const metaClient = new MetaApiClient(token)
-            const metaPayload: any = {}
-            if (status) metaPayload.status = status.toUpperCase()
-            if (name) metaPayload.name = name
-            if (newBudget !== undefined && newBudget !== null) {
-              metaPayload.daily_budget = Math.round(newBudget * 100) // Meta espera em centavos
-            }
-            if (Object.keys(metaPayload).length > 0) {
-              await metaClient.updateCampaign(campaign.externalId, metaPayload)
-            }
-          } catch (metaErr) {
-            console.error(`[Meta Manage] Falha ao atualizar campanha ${campaign.externalId} na Meta:`, metaErr)
-          }
-        }
-
-        updatedItems.push(updated)
-      } else if (level === 'adset') {
-        const adSet = await prisma.adSet.findFirst({
-          where: {
-            workspaceId,
-            OR: [{ id: targetId }, { externalId: targetId }],
-          },
-          include: {
-            campaign: {
-              include: { adAccount: true },
-            },
-          },
-        })
-
-        if (!adSet) continue
-
-        let newBudget = adSet.dailyBudget
-        if (budget !== undefined) {
-          newBudget = Number(budget)
-        } else if (budgetChangePercent !== undefined && adSet.dailyBudget) {
-          newBudget = Math.max(1, Math.round(adSet.dailyBudget * (1 + Number(budgetChangePercent) / 100)))
-        }
-
-        const updateData: any = { updatedAt: new Date() }
-        if (status) updateData.status = status.toUpperCase()
-        if (name) updateData.name = name
-        if (newBudget !== undefined) updateData.dailyBudget = newBudget
-
-        // Atualizar banco local
-        const updated = await prisma.adSet.update({
-          where: { id: adSet.id },
-          data: updateData,
-        })
-
-        // Atualizar na Meta Marketing API
-        const tokenEnc = adSet.campaign?.adAccount?.accessTokenEnc
-        if (tokenEnc) {
-          try {
-            const token = decrypt(tokenEnc)
-            const metaClient = new MetaApiClient(token)
-            const metaPayload: any = {}
-            if (status) metaPayload.status = status.toUpperCase()
-            if (name) metaPayload.name = name
-            if (newBudget !== undefined && newBudget !== null) {
-              metaPayload.daily_budget = Math.round(newBudget * 100) // Centavos
-            }
-            if (Object.keys(metaPayload).length > 0) {
-              await metaClient.updateAdSet(adSet.externalId, metaPayload)
-            }
-          } catch (metaErr) {
-            console.error(`[Meta Manage] Falha ao atualizar conjunto ${adSet.externalId} na Meta:`, metaErr)
-          }
-        }
-
-        updatedItems.push(updated)
-      } else if (level === 'ad') {
-        const ad = await prisma.ad.findFirst({
-          where: {
-            workspaceId,
-            OR: [{ id: targetId }, { externalId: targetId }],
-          },
-          include: {
-            adSet: {
-              include: {
-                campaign: {
-                  include: { adAccount: true },
-                },
-              },
-            },
-          },
-        })
-
-        if (!ad) continue
-
-        const updateData: any = { updatedAt: new Date() }
-        if (status) updateData.status = status.toUpperCase()
-        if (name) updateData.name = name
-
-        // Atualizar banco local
-        const updated = await prisma.ad.update({
-          where: { id: ad.id },
-          data: updateData,
-        })
-
-        // Atualizar na Meta Marketing API
-        const tokenEnc = ad.adSet?.campaign?.adAccount?.accessTokenEnc
-        if (tokenEnc) {
-          try {
-            const token = decrypt(tokenEnc)
-            const metaClient = new MetaApiClient(token)
-            const metaPayload: any = {}
-            if (status) metaPayload.status = status.toUpperCase()
-            if (name) metaPayload.name = name
-            if (Object.keys(metaPayload).length > 0) {
-              await metaClient.updateAd(ad.externalId, metaPayload)
-            }
-          } catch (metaErr) {
-            console.error(`[Meta Manage] Falha ao atualizar anúncio ${ad.externalId} na Meta:`, metaErr)
-          }
-        }
-
-        updatedItems.push(updated)
+      } catch (error) {
+        failures.push({ id: targetId, error: error instanceof Error ? error.message : 'Erro desconhecido' })
       }
     }
-
     return NextResponse.json({
-      success: true,
+      success: failures.length === 0,
       updatedCount: updatedItems.length,
       items: updatedItems,
-    })
-  } catch (error: any) {
-    console.error('Error in /api/meta/manage:', error)
-    return NextResponse.json(
-      { error: error.message || 'Erro ao atualizar entidade Meta' },
-      { status: 500 }
-    )
+      failures,
+      error: failures.map((failure) => failure.id + ': ' + failure.error).join('; ') || undefined,
+    }, { status: failures.length ? 502 : 200 })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Erro ao atualizar na Meta' }, { status: 500 })
+  }
+}
+
+function resolveBudget(current: number | null, budget: unknown, percent: unknown): number | undefined {
+  if (budget !== undefined) {
+    const value = Number(budget)
+    if (value <= 0) throw new Error('Orçamento deve ser positivo')
+    return value
+  }
+  if (percent !== undefined) {
+    if (current === null) throw new Error('Item sem orçamento diário para ajuste percentual')
+    const value = Math.round(current * (1 + Number(percent) / 100) * 100) / 100
+    if (value <= 0) throw new Error('Orçamento resultante deve ser positivo')
+    return value
+  }
+  return undefined
+}
+
+function makePayload(status?: string, name?: string, dailyBudget?: number) {
+  return {
+    ...(status ? { status: status.toUpperCase() } : {}),
+    ...(name ? { name: name.trim() } : {}),
+    ...(dailyBudget !== undefined ? { daily_budget: Math.round(dailyBudget * 100) } : {}),
+  }
+}
+
+function localChanges(status?: string, name?: string, dailyBudget?: number) {
+  return {
+    ...(status ? { status: status.toUpperCase() } : {}),
+    ...(name ? { name: name.trim() } : {}),
+    ...(dailyBudget !== undefined ? { dailyBudget } : {}),
   }
 }
