@@ -201,19 +201,28 @@ if ! $DOCKER_COMPOSE_CMD run --rm utm-track npx prisma db push; then
     fi
 fi
 
-# 7. Iniciar Container
-echo -e "\n${YELLOW}>> 7. Inicializando o container em segundo plano...${NC}"
+# 7. Popular usuário inicial e workspace se necessário
+echo -e "\n${YELLOW}>> 7. Criando usuário administrador inicial e workspace...${NC}"
+$DOCKER_COMPOSE_CMD run --rm utm-track npx tsx prisma/seed.ts || true
+
+# 8. Iniciar Container
+echo -e "\n${YELLOW}>> 8. Inicializando o container em segundo plano...${NC}"
 $DOCKER_COMPOSE_CMD up -d --remove-orphans
 
 sleep 3
 
-# 8. Validar Status
-echo -e "\n${YELLOW}>> 8. Status do container:${NC}"
+# 9. Validar Status
+echo -e "\n${YELLOW}>> 9. Status do container:${NC}"
 docker ps -f name=utm-track
 
 echo -e "\n${GREEN}==============================================================================${NC}"
 echo -e "${GREEN}   UTM-TRACK INSTALADO E EM EXECUÇÃO NO DOCKER NA PORTA LOCAL 3030!          ${NC}"
 echo -e "${GREEN}==============================================================================${NC}"
+
+echo -e "\n${CYAN}>> Credenciais de Acesso Inicial:${NC}"
+echo -e "   - ${CYAN}E-mail:${NC} demo@utmtrack.com"
+echo -e "   - ${CYAN}Senha:${NC}  senha123456"
+echo -e "   ${YELLOW}(Você pode alterar sua senha a qualquer momento na página 'Minha Conta')${NC}\n"
 
 echo -e "\n${CYAN}>> Como configurar no seu Nginx Proxy Manager (NPM):${NC}"
 echo -e "1. Acesse o seu painel do Nginx Proxy Manager no navegador."
