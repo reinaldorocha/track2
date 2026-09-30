@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: utm-track-app
+    container_name: utm-track
     restart: always
     ports:
       - "0.0.0.0:3030:3000"

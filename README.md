@@ -128,7 +128,7 @@ git clone https://github.com/reinaldorocha/track2.git /root/utm-track && cd /roo
 2. Vá em **Proxy Hosts** ➔ **Add Proxy Host**:
    - **Domain Names**: `track.seudominio.com.br`
    - **Scheme**: `http`
-   - **Forward Hostname / IP**: `utm-track-app`
+   - **Forward Hostname / IP**: `utm-track`
    - **Forward Port**: `3000`
    - Ative: **Block Common Exploits** e **Websockets Support**
 3. Na aba **SSL**:

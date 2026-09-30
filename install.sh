@@ -119,7 +119,7 @@ if ! docker network inspect "$PG_NETWORK" &>/dev/null; then
 fi
 
 # Ajustar o nome da rede no docker-compose.yml se for diferente de stack_default
-sed -i "s/name: .*/name: ${PG_NETWORK}/" docker-compose.yml 2>/dev/null || true
+sed -i "/app_network:/,/external:/ s/name: .*/name: ${PG_NETWORK}/" docker-compose.yml 2>/dev/null || true
 
 # Garantir que o banco de dados utmtrack existe no Postgres
 echo -e "${YELLOW}>> Verificando banco de dados 'utmtrack'...${NC}"
@@ -209,7 +209,7 @@ sleep 3
 
 # 8. Validar Status
 echo -e "\n${YELLOW}>> 8. Status do container:${NC}"
-docker ps -f name=utm-track-app
+docker ps -f name=utm-track
 
 echo -e "\n${GREEN}==============================================================================${NC}"
 echo -e "${GREEN}   UTM-TRACK INSTALADO E EM EXECUÇÃO NO DOCKER NA PORTA LOCAL 3030!          ${NC}"
@@ -220,7 +220,7 @@ echo -e "1. Acesse o seu painel do Nginx Proxy Manager no navegador."
 echo -e "2. Vá em ${YELLOW}Proxy Hosts${NC} -> ${YELLOW}Add Proxy Host${NC} e preencha:"
 echo -e "   - ${CYAN}Domain Names:${NC} ${DOMAIN_CLEAN}"
 echo -e "   - ${CYAN}Scheme:${NC} http"
-echo -e "   - ${CYAN}Forward Hostname / IP:${NC} utm-track-app"
+echo -e "   - ${CYAN}Forward Hostname / IP:${NC} utm-track"
 echo -e "   - ${CYAN}Forward Port:${NC} 3000"
 echo -e "   - Ative: ${YELLOW}Block Common Exploits${NC} e ${YELLOW}Websockets Support${NC}"
 echo -e "3. Na aba ${YELLOW}SSL${NC}:"

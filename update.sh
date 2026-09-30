@@ -66,7 +66,7 @@ docker image prune -f
 # 8. Validar status do container
 echo -e "\n${YELLOW}>> 6. Status do container:${NC}"
 sleep 3
-docker ps -f name=utm-track-app
+docker ps -f name=utm-track
 
 echo -e "\n${GREEN}==============================================================================${NC}"
 echo -e "${GREEN}             UTM-TRACK ATUALIZADO COM SUCESSO!                                ${NC}"
