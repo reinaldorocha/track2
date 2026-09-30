@@ -6,11 +6,16 @@ services:
     container_name: utm-track-app
     restart: always
     ports:
-      - "127.0.0.1:3008:3000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "0.0.0.0:3030:3000"
+    networks:
+      - app_network
     env_file:
       - .env.production
     environment:
       - NODE_ENV=production
       - PORT=3000
+
+networks:
+  app_network:
+    name: stack_default
+    external: true

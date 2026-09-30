@@ -53,7 +53,7 @@ $DOCKER_COMPOSE_CMD build
 
 # 5. Aplicar atualizações de schema no PostgreSQL
 echo -e "\n${YELLOW}>> 3. Aplicando atualizações de banco de dados (Prisma db push)...${NC}"
-$DOCKER_COMPOSE_CMD run --rm utm-track sh -c 'grep -q "provider = \"postgresql\"" prisma/schema.prisma && npx prisma db push'
+$DOCKER_COMPOSE_CMD run --rm utm-track npx prisma db push
 
 # 6. Reiniciar container com a nova versão
 echo -e "\n${YELLOW}>> 4. Reiniciando a aplicação (zero-downtime)...${NC}"
