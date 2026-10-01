@@ -78,7 +78,15 @@ interface CampaignsTableProps {
   periodTo?: string;
 }
 
-export function getRecommendationBadge(rec?: MetaRecommendation) {
+export function getRecommendationBadge(rec?: MetaRecommendation, item?: { spend?: number }) {
+  if (!rec && item?.spend && item.spend > 0) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300 border border-sky-300/60 dark:border-sky-700/60 whitespace-nowrap">
+        <span>🧪</span> Em Teste
+      </span>
+    );
+  }
+
   switch (rec) {
     case "scale":
       return (
@@ -112,6 +120,13 @@ export function getRecommendationBadge(rec?: MetaRecommendation) {
       );
     case "inactive":
     default:
+      if (item?.spend && item.spend > 0) {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300 border border-sky-300/60 dark:border-sky-700/60 whitespace-nowrap">
+            <span>🧪</span> Em Teste
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-normal bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 whitespace-nowrap">
           <span>⏸️</span> Sem Gasto
@@ -1029,7 +1044,7 @@ export function CampaignsTable({
 
                       {visibleColumns.recommendation && (
                         <td className="p-3">
-                          {getRecommendationBadge(item.recommendation)}
+                          {getRecommendationBadge(item.recommendation, item)}
                         </td>
                       )}
 

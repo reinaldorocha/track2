@@ -12,24 +12,41 @@ export interface SyncResult {
   reconnectRequired?: boolean
 }
 
-function parseConversions(actions: any[] | undefined | null): { conversions: number; conversionValue: number } {
-  if (!Array.isArray(actions)) return { conversions: 0, conversionValue: 0 }
-  
+export function parseConversions(
+  actions: any[] | undefined | null,
+  actionValues?: any[] | undefined | null
+): { conversions: number; conversionValue: number } {
   let conversions = 0
   let conversionValue = 0
 
-  for (const action of actions) {
-    const actionType = String(action.action_type || '').toLowerCase()
-    // Standard Meta conversion action types
-    if (
-      actionType === 'purchase' ||
-      actionType === 'omni_purchase' ||
-      actionType === 'offsite_conversion.fb_pixel_purchase' ||
-      actionType === 'lead' ||
-      actionType === 'offsite_conversion.fb_pixel_lead' ||
-      actionType.includes('purchase')
-    ) {
-      conversions += parseInt(action.value, 10) || 1
+  if (Array.isArray(actions)) {
+    // Tipos de ação de compra canônicos da Meta em ordem estrita de prioridade
+    // IMPORTANTE: Nunca somar tipos de compra diferentes! A Meta retorna 'offsite_conversion.fb_pixel_purchase',
+    // 'purchase', 'omni_purchase' e 'onsite_web_purchase' para a MESMA conversão (duplicando de 4x a 7x).
+    const purchaseAction =
+      actions.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase') ||
+      actions.find((a: any) => a.action_type === 'purchase') ||
+      actions.find((a: any) => a.action_type === 'omni_purchase') ||
+      actions.find((a: any) => a.action_type === 'onsite_web_purchase') ||
+      actions.find((a: any) => typeof a.action_type === 'string' && a.action_type.endsWith('_purchase')) ||
+      actions.find((a: any) => typeof a.action_type === 'string' && a.action_type.includes('purchase'))
+
+    if (purchaseAction) {
+      conversions = parseInt(purchaseAction.value, 10) || 0
+    }
+  }
+
+  if (Array.isArray(actionValues)) {
+    const valueAction =
+      actionValues.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase') ||
+      actionValues.find((a: any) => a.action_type === 'purchase') ||
+      actionValues.find((a: any) => a.action_type === 'omni_purchase') ||
+      actionValues.find((a: any) => a.action_type === 'onsite_web_purchase') ||
+      actionValues.find((a: any) => typeof a.action_type === 'string' && a.action_type.endsWith('_purchase')) ||
+      actionValues.find((a: any) => typeof a.action_type === 'string' && a.action_type.includes('purchase'))
+
+    if (valueAction) {
+      conversionValue = parseFloat(valueAction.value) || 0
     }
   }
 
@@ -81,6 +98,8 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
     let totalInsights = 0
 
     const campaignDbMap = new Map<string, string>() // externalId -> dbId
+    const adSetDbMap = new Map<string, string>() // externalId -> dbId
+    const adDbMap = new Map<string, string>() // externalId -> dbId
 
     for (const c of campaigns) {
       const dbCampaign = await prisma.campaign.upsert({
@@ -161,13 +180,15 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
             }
           })
 
+          adSetDbMap.set(as.id, dbAdSet.id)
+
           // 3. Sincronizar Anúncios (Ads)
           try {
             const ads = await client.getAds(as.id)
             totalAds += ads.length
 
             for (const ad of ads) {
-              await prisma.ad.upsert({
+              const dbAd = await prisma.ad.upsert({
                 where: {
                   adSetId_externalId: {
                     adSetId: dbAdSet.id,
@@ -192,6 +213,8 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
                   lastSyncAt: new Date()
                 }
               })
+
+              adDbMap.set(ad.id, dbAd.id)
             }
           } catch (adErr) {
             console.warn(`[Sync] Aviso ao sincronizar anúncios do AdSet ${as.id}:`, adErr)
@@ -202,9 +225,20 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       }
     }
 
-    // 4. Sincronizar Métricas e Insights Reais (Últimos 30 dias com quebra diária)
+    // 4. Sincronizar Métricas e Insights Reais (Últimos 37 dias incluindo HOJE na timezone de Brasília)
     try {
-      const insights = await client.getInsights(account.externalId, 'campaign', 'last_30d')
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      })
+      const todayStr = formatter.format(new Date()) // YYYY-MM-DD
+      const sinceDate = new Date(Date.now() - 37 * 86400000)
+      const sinceStr = formatter.format(sinceDate) // YYYY-MM-DD
+
+      // 4.1 Insights de Campanhas
+      const insights = await client.getInsights(account.externalId, 'campaign', undefined, sinceStr, todayStr)
       
       for (const ins of insights) {
         const campaignDbId = campaignDbMap.get(ins.campaign_id)
@@ -222,7 +256,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
         const cpm = parseFloat(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
         const frequency = parseFloat(ins.frequency) || (reach > 0 ? impressions / reach : 1)
 
-        const { conversions, conversionValue } = parseConversions(ins.actions)
+        const { conversions, conversionValue } = parseConversions(ins.actions, ins.action_values)
 
         await prisma.campaignInsight.upsert({
           where: {
@@ -267,6 +301,137 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
 
         totalInsights++
       }
+
+      // 4.2 Insights de Conjuntos de Anúncios (AdSets)
+      try {
+        const adSetInsights = await client.getInsights(account.externalId, 'adset', undefined, sinceStr, todayStr)
+        for (const ins of adSetInsights) {
+          const adSetDbId = adSetDbMap.get(ins.adset_id)
+          if (!adSetDbId) continue
+
+          const dateStart = new Date(ins.date_start)
+          const dateStop = new Date(ins.date_stop)
+          const spend = parseFloat(ins.spend) || 0
+          const impressions = parseInt(ins.impressions, 10) || 0
+          const reach = parseInt(ins.reach, 10) || 0
+          const clicks = parseInt(ins.clicks, 10) || 0
+          const ctr = parseFloat(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
+          const cpc = parseFloat(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
+          const cpm = parseFloat(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
+          const frequency = parseFloat(ins.frequency) || (reach > 0 ? impressions / reach : 1)
+
+          const { conversions, conversionValue } = parseConversions(ins.actions, ins.action_values)
+
+          await prisma.adSetInsight.upsert({
+            where: {
+              adSetId_dateStart_dateStop: {
+                adSetId: adSetDbId,
+                dateStart,
+                dateStop
+              }
+            },
+            update: {
+              spend,
+              impressions,
+              reach,
+              clicks,
+              ctr,
+              cpc,
+              cpm,
+              frequency,
+              conversions,
+              conversionValue,
+              actions: ins.actions ? JSON.stringify(ins.actions) : null
+            },
+            create: {
+              adSetId: adSetDbId,
+              dateStart,
+              dateStop,
+              spend,
+              impressions,
+              reach,
+              clicks,
+              ctr,
+              cpc,
+              cpm,
+              frequency,
+              conversions,
+              conversionValue,
+              actions: ins.actions ? JSON.stringify(ins.actions) : null
+            }
+          })
+
+          totalInsights++
+        }
+      } catch (adSetErr) {
+        console.warn(`[Sync] Aviso ao buscar insights de adsets da conta ${account.externalId}:`, adSetErr)
+      }
+
+      // 4.3 Insights de Anúncios (Ads)
+      try {
+        const adInsights = await client.getInsights(account.externalId, 'ad', undefined, sinceStr, todayStr)
+        for (const ins of adInsights) {
+          const adDbId = adDbMap.get(ins.ad_id)
+          if (!adDbId) continue
+
+          const dateStart = new Date(ins.date_start)
+          const dateStop = new Date(ins.date_stop)
+          const spend = parseFloat(ins.spend) || 0
+          const impressions = parseInt(ins.impressions, 10) || 0
+          const reach = parseInt(ins.reach, 10) || 0
+          const clicks = parseInt(ins.clicks, 10) || 0
+          const ctr = parseFloat(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
+          const cpc = parseFloat(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
+          const cpm = parseFloat(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
+          const frequency = parseFloat(ins.frequency) || (reach > 0 ? impressions / reach : 1)
+
+          const { conversions, conversionValue } = parseConversions(ins.actions, ins.action_values)
+
+          await prisma.adInsight.upsert({
+            where: {
+              adId_dateStart_dateStop: {
+                adId: adDbId,
+                dateStart,
+                dateStop
+              }
+            },
+            update: {
+              spend,
+              impressions,
+              reach,
+              clicks,
+              ctr,
+              cpc,
+              cpm,
+              frequency,
+              conversions,
+              conversionValue,
+              actions: ins.actions ? JSON.stringify(ins.actions) : null
+            },
+            create: {
+              adId: adDbId,
+              dateStart,
+              dateStop,
+              spend,
+              impressions,
+              reach,
+              clicks,
+              ctr,
+              cpc,
+              cpm,
+              frequency,
+              conversions,
+              conversionValue,
+              actions: ins.actions ? JSON.stringify(ins.actions) : null
+            }
+          })
+
+          totalInsights++
+        }
+      } catch (adErr) {
+        console.warn(`[Sync] Aviso ao buscar insights de anúncios da conta ${account.externalId}:`, adErr)
+      }
+
     } catch (insightErr) {
       console.warn(`[Sync] Aviso ao buscar insights da conta ${account.externalId}:`, insightErr)
     }
@@ -351,7 +516,21 @@ export async function syncInsightsOnly(
     
     const token = decrypt(account.accessTokenEnc)
     const client = new MetaApiClient(token)
-    const insights = await client.getInsights(account.externalId, 'campaign', 'last_30d', since, until)
+
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+    const todayStr = formatter.format(new Date())
+    const sinceDate = new Date(Date.now() - 37 * 86400000)
+    const sinceStr = formatter.format(sinceDate)
+
+    const effectiveSince = since || sinceStr
+    const effectiveUntil = until || todayStr
+
+    const insights = await client.getInsights(account.externalId, 'campaign', undefined, effectiveSince, effectiveUntil)
 
     return { success: true, count: insights.length }
   } catch (e: unknown) {
