@@ -155,7 +155,7 @@ export function CampaignsTable({
   const [isColumnPickerOpen, setIsColumnPickerOpen] = useState(false);
 
   // Modais de Edição
-  const [editingBudget, setEditingBudget] = useState<{ id: string; name: string; budget: number } | null>(null);
+  const [editingBudget, setEditingBudget] = useState<{ id: string; name: string; budget: string; currency: string } | null>(null);
   const [editingName, setEditingName] = useState<{ id: string; name: string } | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
@@ -1108,13 +1108,14 @@ export function CampaignsTable({
                       {visibleColumns.budget && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300 group">
                           <div className="flex items-center justify-end gap-1.5">
-                            <span>{item.budget ? formatCurrency(item.budget) : "—"}</span>
+                            <span>{money(item.budget, item.currency)}</span>
                             <button
                               onClick={() =>
                                 setEditingBudget({
                                   id: item.id,
                                   name: item.name,
-                                  budget: item.budget || 50,
+                                  budget: item.budget?.toString() ?? "",
+                                  currency: item.currency || 'BRL',
                                 })
                               }
                               className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-blue-600 rounded transition-opacity"
@@ -1334,7 +1335,7 @@ export function CampaignsTable({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Novo Orçamento Diário (R$)
+                Novo Orçamento Diário ({editingBudget.currency})
               </label>
               <input
                 type="number"
@@ -1342,7 +1343,7 @@ export function CampaignsTable({
                 min="5"
                 value={editingBudget.budget}
                 onChange={(e) =>
-                  setEditingBudget({ ...editingBudget, budget: Number(e.target.value) })
+                  setEditingBudget({ ...editingBudget, budget: e.target.value })
                 }
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-[#142C52] bg-slate-50 dark:bg-[#061224] text-sm font-mono font-bold text-slate-900 dark:text-white"
               />
@@ -1362,10 +1363,11 @@ export function CampaignsTable({
                   onClick={() =>
                     setEditingBudget({
                       ...editingBudget,
-                      budget: Math.round(editingBudget.budget * p.factor),
+                      budget: Math.round(Number(editingBudget.budget) * p.factor).toString(),
                     })
                   }
                   className="px-2.5 py-1 bg-slate-100 dark:bg-[#142C52] hover:bg-blue-50 dark:hover:bg-blue-950/60 text-slate-700 dark:text-slate-300 hover:text-blue-600 rounded-lg text-[11px] font-semibold transition-colors"
+                  disabled={!editingBudget.budget}
                 >
                   {p.label}
                 </button>
@@ -1386,10 +1388,10 @@ export function CampaignsTable({
                   manageMutation.mutate({
                     level,
                     id: editingBudget.id,
-                    budget: editingBudget.budget,
+                    budget: Number(editingBudget.budget),
                   })
                 }
-                disabled={manageMutation.isPending}
+                disabled={manageMutation.isPending || !editingBudget.budget || Number(editingBudget.budget) < 5}
                 className="flex-1 py-2 text-xs bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow disabled:opacity-50"
               >
                 {manageMutation.isPending ? "Salvando na Meta..." : "Salvar no Facebook"}
