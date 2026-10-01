@@ -91,4 +91,23 @@ describe('Ciclo Completo de Vendas, Fluxo Pix e Push Notifications', () => {
     const json = JSON.parse(fs.readFileSync(gservicesPath, 'utf-8'));
     assert.strictEqual(json.client[0].client_info.android_client_info.package_name, 'com.utmtrack.app');
   });
+
+  test('PWA: Service Worker public/sw.js existe e trata push e notificationclick', () => {
+    const swPath = path.join(rootDir, 'public', 'sw.js');
+    assert.ok(fs.existsSync(swPath), 'public/sw.js deve existir para suporte PWA Android');
+
+    const swContent = fs.readFileSync(swPath, 'utf-8');
+    assert.ok(swContent.includes('push'), 'sw.js deve escutar evento push');
+    assert.ok(swContent.includes('notificationclick'), 'sw.js deve escutar notificationclick');
+    assert.ok(swContent.includes('showNotification'), 'sw.js deve invocar showNotification');
+  });
+
+  test('PWA: Chave VAPID pública e privada são válidas e carregadas via módulo vapid.ts', async () => {
+    const { getVapidPublicKey, getVapidPrivateKey } = await import('../src/lib/notifications/vapid');
+    const pubKey = getVapidPublicKey();
+    const privKey = getVapidPrivateKey();
+
+    assert.ok(pubKey && pubKey.length > 50, 'Chave VAPID pública deve estar configurada');
+    assert.ok(privKey && privKey.length > 30, 'Chave VAPID privada deve estar configurada');
+  });
 });

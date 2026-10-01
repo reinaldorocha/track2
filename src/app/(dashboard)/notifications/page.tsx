@@ -151,9 +151,10 @@ export default function NotificationsPage() {
         body: JSON.stringify({ type, amount: 151.04 }),
       });
       const data = await res.json();
-      if (data.success) {
-        await playNotificationSound(sound);
-        queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      await playNotificationSound(sound);
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      if (data.warning) {
+        console.info(data.message);
       }
     } catch (err) {
       console.error("Erro ao testar notificação:", err);

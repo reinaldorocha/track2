@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { initVapid, webpush } from "./vapid";
 
 export interface PushPayload {
   notificationId: string;
@@ -41,6 +42,7 @@ export async function dispatchPushToDevices(payload: PushPayload): Promise<PushD
     orderId,
     amount,
     currency,
+    platform,
     notificationId,
   } = payload;
 
@@ -72,6 +74,59 @@ export async function dispatchPushToDevices(payload: PushPayload): Promise<PushD
 
   for (const dev of devices) {
     try {
+      // 1. Verificacao de dispositivo PWA / Web Push (token JSON com endpoint e keys)
+      let isWebPush = false;
+      let webPushSub: any = null;
+
+      if (dev.token.trim().startsWith("{")) {
+        try {
+          webPushSub = JSON.parse(dev.token);
+          if (webPushSub && webPushSub.endpoint) {
+            isWebPush = true;
+          }
+        } catch {
+          // Token nao e JSON, segue para fluxo FCM nativo
+        }
+      }
+
+      if (isWebPush) {
+        initVapid();
+        const pwaPayload = JSON.stringify({
+          title,
+          body,
+          sound,
+          customSoundUrl: customSoundUrl || "",
+          customSoundName: customSoundName || "",
+          isCustomSound: customSoundUrl ? "true" : "false",
+          saleId: saleId || "",
+          orderId: orderId || "",
+          amount,
+          currency: currency || "BRL",
+          platform: platform || "",
+          notificationId,
+          deepLink,
+          icon: "/icon-192.png",
+          badge: "/brand/notifications/notification-badge-96.png",
+        });
+
+        try {
+          await webpush.sendNotification(webPushSub, pwaPayload);
+          result.successCount++;
+        } catch (err: any) {
+          const statusCode = err?.statusCode;
+          if (statusCode === 404 || statusCode === 410) {
+            await prisma.device.update({
+              where: { id: dev.id },
+              data: { isActive: false },
+            });
+            result.prunedTokensCount++;
+          }
+          result.failureCount++;
+          result.errors.push(`PWA Device ${dev.id}: ${err.message || String(err)}`);
+        }
+        continue;
+      }
+
       if (fcmServerKey) {
         // Send via FCM Legacy / v1 protocol
         const fcmResponse = await fetch("https://fcm.googleapis.com/fcm/send", {

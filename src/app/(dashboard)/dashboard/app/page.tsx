@@ -20,9 +20,13 @@ import {
 } from "lucide-react";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
 import { playNotificationSound, SoundType } from "@/lib/sound";
+import { subscribePwaPush } from "@/lib/mobile/pwa-push";
 
 export default function AppStatusPage() {
   const [activeTab, setActiveTab] = useState<"mobile" | "services">("mobile");
+  const [activatingPush, setActivatingPush] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [testingPush, setTestingPush] = useState(false);
 
   const { data: accountsData, isLoading: loadingAccounts, refetch } = useQuery({
     queryKey: ["meta-accounts"],
@@ -34,7 +38,7 @@ export default function AppStatusPage() {
     queryFn: () => fetch("/api/pixels").then((r) => r.json()),
   });
 
-  const { data: devicesData } = useQuery<{ devices: any[] }>({
+  const { data: devicesData, refetch: refetchDevices } = useQuery<{ devices: any[] }>({
     queryKey: ["registered-devices"],
     queryFn: () => fetch("/api/devices").then((r) => r.json()),
     refetchInterval: 8000,
@@ -43,6 +47,52 @@ export default function AppStatusPage() {
   const accounts = accountsData?.accounts || [];
   const pixels = pixelsData?.pixels || [];
   const devices = devicesData?.devices || [];
+
+  const handleSubscribePwa = async () => {
+    setActivatingPush(true);
+    setPushMessage(null);
+    try {
+      const res = await subscribePwaPush();
+      if (res.success) {
+        setPushMessage("Notificações ativadas com sucesso neste aparelho!");
+        playNotificationSound("som_venda_aprovada");
+        await refetchDevices();
+      } else {
+        setPushMessage(res.error || "Permissão não concedida no navegador.");
+      }
+    } catch (e: any) {
+      setPushMessage(e.message || "Erro ao ativar.");
+    } finally {
+      setActivatingPush(false);
+    }
+  };
+
+  const handleTestPush = async () => {
+    setTestingPush(true);
+    setPushMessage(null);
+    try {
+      const res = await fetch("/api/notifications/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "sale_approved",
+          title: "💰 Venda Aprovada (Teste)",
+          message: "Teste de notificação recebido com sucesso no seu dispositivo!",
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPushMessage("Push enviado com sucesso! Verifique seu aparelho.");
+        playNotificationSound("som_venda_aprovada");
+      } else {
+        setPushMessage(data.warning || data.error || "Falha ao enviar push.");
+      }
+    } catch (e: any) {
+      setPushMessage(e.message || "Erro ao testar.");
+    } finally {
+      setTestingPush(false);
+    }
+  };
 
   const apps = [
     {
@@ -188,12 +238,51 @@ export default function AppStatusPage() {
                 </span>
               </div>
 
+              {/* Ação de Ativação PWA / Web Push */}
+              <div className="p-3.5 bg-gradient-to-r from-sky-500/10 via-sky-500/5 to-transparent border border-sky-500/20 rounded-xl space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                      <Bell className="w-4 h-4 text-sky-500" />
+                      Push Notifications PWA (Android / Navegador)
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Conecte este celular para receber o som Cha-ching de vendas e alertas em segundo plano.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={handleSubscribePwa}
+                      disabled={activatingPush}
+                      className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:bg-sky-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center gap-1"
+                    >
+                      {activatingPush ? "Ativando..." : "Ativar Neste Aparelho"}
+                    </button>
+                    {devices.length > 0 && (
+                      <button
+                        onClick={handleTestPush}
+                        disabled={testingPush}
+                        className="px-2.5 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold text-xs rounded-lg transition"
+                      >
+                        {testingPush ? "Enviando..." : "Testar Push"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {pushMessage && (
+                  <div className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-sky-100/60 dark:bg-sky-900/40 text-sky-800 dark:text-sky-200">
+                    {pushMessage}
+                  </div>
+                )}
+              </div>
+
               {devices.length === 0 ? (
-                <div className="p-8 text-center border border-dashed border-gray-200 dark:border-gray-800 rounded-xl text-gray-500">
+                <div className="p-6 text-center border border-dashed border-gray-200 dark:border-gray-800 rounded-xl text-gray-500">
                   <Smartphone className="w-8 h-8 mx-auto text-gray-300 dark:text-gray-600 mb-2" />
                   <p className="text-xs font-medium">Nenhum dispositivo registrado ainda</p>
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Ao abrir o app no Android ou iOS, seu token de push será vinculado automaticamente ao workspace.
+                    Toque no botão <strong className="text-sky-600 dark:text-sky-400">Ativar Neste Aparelho</strong> acima para conceder permissão e registrar seu Android.
                   </p>
                 </div>
               ) : (
