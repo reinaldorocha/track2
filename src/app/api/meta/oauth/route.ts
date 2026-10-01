@@ -32,8 +32,7 @@ export async function GET(request: Request) {
     response_type: 'code',
     state,
   })
-
-  console.log('[Meta OAuth] Redirecionando para Meta OAuth Dialog. AppID:', appId, 'RedirectUri:', redirectUri)
+  
   return NextResponse.redirect(`https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`)
 }
 
