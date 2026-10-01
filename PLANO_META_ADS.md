@@ -10,7 +10,7 @@
 - [x] Atualização automática na VPS, status e erro na tela.
 - [x] Seleção hierárquica e filtros completos na interface.
 - [x] Totais e moedas na interface.
-- [x] 237 testes automatizados, lint dos arquivos alterados, checagem de tipos, schema PostgreSQL e build local.
+- [x] Testes automatizados, lint dos arquivos alterados, checagem de tipos, schema PostgreSQL e build local.
 - [ ] Comparação com Meta e PostgreSQL de produção.
 - [x] PR #2 aberto em rascunho com código, testes e limitações documentadas.
 

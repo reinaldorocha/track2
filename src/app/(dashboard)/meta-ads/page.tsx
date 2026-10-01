@@ -28,6 +28,8 @@ type AdAccount = {
   createdAt: string;
 };
 
+const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
 function MetaAdsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -489,8 +491,8 @@ function MetaAdsContent() {
           adAccountId={selectedAdAccount}
           selectedIds={selectedCampaignIds}
           onSelectedIdsChange={(ids) => { setSelectedCampaignIds(ids); setSelectedAdSetIds([]); }}
-          periodFrom={period.from.toISOString()}
-          periodTo={period.to.toISOString()}
+          periodFrom={localDate(period.from)}
+          periodTo={localDate(period.to)}
           periodPreset={period.preset}
         />
       )}
@@ -503,8 +505,8 @@ function MetaAdsContent() {
           campaignIds={selectedCampaignIds}
           selectedIds={selectedAdSetIds}
           onSelectedIdsChange={setSelectedAdSetIds}
-          periodFrom={period.from.toISOString()}
-          periodTo={period.to.toISOString()}
+          periodFrom={localDate(period.from)}
+          periodTo={localDate(period.to)}
           periodPreset={period.preset}
         />
       )}
@@ -516,8 +518,8 @@ function MetaAdsContent() {
           adAccountId={selectedAdAccount}
           campaignIds={selectedCampaignIds}
           adSetIds={selectedAdSetIds}
-          periodFrom={period.from.toISOString()}
-          periodTo={period.to.toISOString()}
+          periodFrom={localDate(period.from)}
+          periodTo={localDate(period.to)}
           periodPreset={period.preset}
         />
       )}

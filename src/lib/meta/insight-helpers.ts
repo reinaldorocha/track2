@@ -4,6 +4,24 @@ export const day = (instant: Date, timezone: string) => new Intl.DateTimeFormat(
 export const chosenDay = (value: string | null, timezone: string, fallback: Date) => value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : day(value && !Number.isNaN(Date.parse(value)) ? new Date(value) : fallback, timezone)
 export const nextDay = (value: string) => new Date(Date.parse(value + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)
 
+export function resolveRange(preset: string | null, timezone: string, fromValue: string | null, toValue: string | null, now = new Date()): { from: string; to: string } {
+  const label = (preset || '').toLowerCase()
+  const today = day(now, timezone)
+  const shift = (value: string, days: number) => new Date(Date.parse(value + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10)
+  if (label === 'hoje' || label === 'today') return { from: today, to: today }
+  if (label === 'ontem' || label === 'yesterday') return { from: shift(today, -1), to: shift(today, -1) }
+  for (const count of [7, 15, 30, 60, 90]) {
+    if (label.includes(String(count)) || label === `last${count}days`) return { from: shift(today, 1 - count), to: today }
+  }
+  if (label.includes('este m') || label === 'thismonth') return { from: `${today.slice(0, 7)}-01`, to: today }
+  if (label.includes('anterior') || label === 'lastmonth') {
+    const firstThisMonth = `${today.slice(0, 7)}-01`
+    const lastPreviousMonth = shift(firstThisMonth, -1)
+    return { from: `${lastPreviousMonth.slice(0, 7)}-01`, to: lastPreviousMonth }
+  }
+  return { from: chosenDay(fromValue, timezone, new Date(now.getTime() - 29 * 86400000)), to: chosenDay(toValue, timezone, now) }
+}
+
 export function midnight(value: string, timezone: string): Date {
   const target = Date.parse(value + 'T00:00:00Z')
   let instant = target

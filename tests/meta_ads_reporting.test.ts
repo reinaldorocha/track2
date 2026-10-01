@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import axios from 'axios'
 import { MetaApiClient } from '../src/lib/meta/client'
-import { day, midnight, measure, nextDay, assignSales, hasCompleteCoverage } from '../src/lib/meta/insight-helpers'
+import { day, midnight, measure, nextDay, assignSales, hasCompleteCoverage, resolveRange } from '../src/lib/meta/insight-helpers'
 
 describe('Meta Ads reporting', () => {
   it('percorre todas as páginas e mantém o token fora do resultado', async () => {
@@ -28,6 +28,15 @@ describe('Meta Ads reporting', () => {
     assert.equal(nextDay('2026-09-30'), '2026-10-01')
     assert.equal(midnight('2026-03-08', 'America/New_York').toISOString(), '2026-03-08T05:00:00.000Z')
     assert.equal(midnight('2026-03-09', 'America/New_York').toISOString(), '2026-03-09T04:00:00.000Z')
+  })
+
+  it('calcula Hoje, Ontem e períodos históricos no fuso da conta', () => {
+    const now = new Date('2026-10-01T02:30:00Z')
+    assert.deepEqual(resolveRange('Hoje', 'America/Sao_Paulo', null, null, now), { from: '2026-09-30', to: '2026-09-30' })
+    assert.deepEqual(resolveRange('Ontem', 'America/Sao_Paulo', null, null, now), { from: '2026-09-29', to: '2026-09-29' })
+    assert.deepEqual(resolveRange('Últimos 90 dias', 'America/Sao_Paulo', null, null, now), { from: '2026-07-03', to: '2026-09-30' })
+    assert.deepEqual(resolveRange('Mês anterior', 'America/Sao_Paulo', null, null, now), { from: '2026-08-01', to: '2026-08-31' })
+    assert.deepEqual(resolveRange('Personalizado', 'America/Sao_Paulo', '2026-08-10', '2026-08-12', now), { from: '2026-08-10', to: '2026-08-12' })
   })
 
   it('distingue ausência de insight, zero medido e IC real', () => {

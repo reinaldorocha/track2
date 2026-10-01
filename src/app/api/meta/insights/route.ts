@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
-import { day, chosenDay, nextDay, midnight, measure, assignSales, hasCompleteCoverage, type MetaInsight } from '@/lib/meta/insight-helpers'
+import { resolveRange, nextDay, midnight, measure, assignSales, hasCompleteCoverage, type MetaInsight } from '@/lib/meta/insight-helpers'
 
 type Row = { id: string; externalId: string; name: string; status: string; budget: number | null; accountId: string; accountName: string; currency: string; campaignId?: string; adSetId?: string; parentName?: string; campaignName?: string; previewUrl?: string | null; insights: MetaInsight[] }
 
@@ -21,12 +21,7 @@ export async function GET(req: Request) {
     const accountIds = accounts.map(a => a.id)
     const accountMap = new Map(accounts.map(a => [a.id, a]))
     const dates = new Map(accounts.map(a => {
-      const preset = params.get('preset')?.toLowerCase() || ''
-      const today = day(new Date(), a.timezone)
-      const offset = preset === 'hoje' || preset === 'today' ? 0 : preset === 'ontem' || preset === 'yesterday' ? 1 : null
-      const selected = offset === null ? null : new Date(Date.parse(today + 'T00:00:00Z') - offset * 86400000).toISOString().slice(0, 10)
-      const from = selected || chosenDay(params.get('from'), a.timezone, new Date(Date.now() - 29 * 86400000))
-      const to = selected || chosenDay(params.get('to'), a.timezone, new Date())
+      const { from, to } = resolveRange(params.get('preset'), a.timezone, params.get('from'), params.get('to'))
       return [a.id, { from, to, saleFrom: midnight(from, a.timezone), saleTo: midnight(nextDay(to), a.timezone) }] as const
     }))
     const ranges = [...dates.values()]
