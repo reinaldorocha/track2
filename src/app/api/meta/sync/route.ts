@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     const workspaceId = await getUserWorkspaceId(session.user.id)
     if (!workspaceId) return NextResponse.json({ error: 'No workspace' }, { status: 404 })
 
-    let body: { accountId?: string } = {}
+    let body: { accountId?: string; force?: boolean } = {}
     try {
       body = await req.json()
     } catch {}
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
     // Sync a single account if specified
     if (accountId) {
-      const result = await syncAdAccount(workspaceId, accountId)
+      const result = await syncAdAccount(workspaceId, accountId, body.force === true)
       return NextResponse.json(result, { status: result.success ? 200 : 502 })
     }
 

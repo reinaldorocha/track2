@@ -54,7 +54,7 @@ export function parseConversions(
   return { conversions, conversionValue }
 }
 
-export async function syncAdAccount(workspaceId: string, adAccountDbId: string): Promise<SyncResult> {
+export async function syncAdAccount(workspaceId: string, adAccountDbId: string, ignoreRateLimitCooldown = false): Promise<SyncResult> {
   let syncLogId: string | null = null
 
   try {
@@ -75,7 +75,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       select: { startedAt: true, errorMessage: true },
     })
     const cooldown = previousSync ? metaCooldownRemaining(previousSync.startedAt, previousSync.errorMessage) : 0
-    if (cooldown > 0) {
+    if (cooldown > 0 && !ignoreRateLimitCooldown) {
       return { success: false, campaigns: 0, adSets: 0, ads: 0, insights: 0,
         errors: [`Limite da Meta ativo. Nova tentativa em cerca de ${Math.ceil(cooldown / 60000)} minuto(s).`], rateLimited: true }
     }

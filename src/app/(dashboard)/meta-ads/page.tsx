@@ -99,7 +99,7 @@ function MetaAdsContent() {
       const res = await fetch("/api/meta/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(accountId ? { accountId } : {}),
+        body: JSON.stringify(accountId ? { accountId, force: true } : {}),
       });
 
       const data = await res.json();
@@ -460,7 +460,7 @@ function MetaAdsContent() {
                       disabled={syncMutation.isPending}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-600 dark:text-blue-300 text-xs font-bold rounded-lg transition-colors"
                     >
-                      <RefreshCw className="w-3.5 h-3.5" /> Sincronizar
+                      <RefreshCw className="w-3.5 h-3.5" /> Tentar agora
                     </button>
                     <button
                       onClick={() => deleteAccountMutation.mutate(acc.id)}
