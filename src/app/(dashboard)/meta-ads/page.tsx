@@ -11,6 +11,10 @@ import {
   AlertTriangle,
   CheckSquare,
   Square,
+  UploadCloud,
+  CheckCircle2,
+  FileSpreadsheet,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
@@ -52,6 +56,67 @@ function MetaAdsContent() {
     name: "",
     externalId: "",
     accessToken: "",
+  });
+
+  // Modal de Importação de Histórico via CSV
+  const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvFeedback, setCsvFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    details?: {
+      rows: number;
+      campaigns: number;
+      adSets: number;
+      ads: number;
+      insights: number;
+      period: string;
+      account: string;
+    };
+  } | null>(null);
+
+  const importCsvMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (selectedAdAccount && selectedAdAccount !== "all") {
+        formData.append("adAccountId", selectedAdAccount);
+      }
+
+      const res = await fetch("/api/meta/import-csv", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro ao importar CSV");
+      return data;
+    },
+    onSuccess: (data) => {
+      setCsvFeedback({
+        type: "success",
+        message: "Histórico importado com sucesso!",
+        details: {
+          rows: data.rowsProcessed,
+          campaigns: data.campaignsImported,
+          adSets: data.adSetsImported,
+          ads: data.adsImported,
+          insights: data.insightsCreated,
+          period: `${data.minDate} até ${data.maxDate}`,
+          account: data.adAccountName,
+        },
+      });
+      queryClient.invalidateQueries({ queryKey: ["meta-insights-table"] });
+      queryClient.invalidateQueries({ queryKey: ["meta-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      setCsvFile(null);
+    },
+    onError: (err: Error) => {
+      setCsvFeedback({
+        type: "error",
+        message: err.message || "Falha ao processar arquivo CSV",
+      });
+    },
   });
 
   // Notificações e Progresso de Sincronização
@@ -276,6 +341,19 @@ function MetaAdsContent() {
             value={period.preset}
             onChange={(preset, from, to) => setPeriod({ preset, from, to, label: preset })}
           />
+
+          <button
+            onClick={() => {
+              setIsCsvModalOpen(true);
+              setCsvFeedback(null);
+              setCsvFile(null);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-[#081A33] border border-slate-200 dark:border-[#142C52] text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg hover:bg-slate-100 dark:hover:bg-[#142C52] transition-colors shadow-xs"
+            title="Importar dados históricos da Meta Ads via arquivo CSV"
+          >
+            <UploadCloud className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            Importar CSV
+          </button>
 
           <button
             onClick={() => syncMutation.mutate()}
@@ -674,6 +752,124 @@ function MetaAdsContent() {
                 className="flex-1 py-2 text-xs bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50"
               >
                 Salvar Conta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Importar Histórico CSV */}
+      {isCsvModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white dark:bg-[#081A33] rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 border border-slate-200 dark:border-[#142C52]">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-[#142C52] pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <FileSpreadsheet className="w-5 h-5 text-blue-600" />
+                  Importar Histórico Meta Ads (CSV)
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Carregue relatórios diários de meses ou anos passados sem consumir cota de API
+                </p>
+              </div>
+              <button
+                onClick={() => setIsCsvModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Feedback de Sucesso */}
+            {csvFeedback?.type === "success" && (
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{csvFeedback.message}</span>
+                </div>
+                {csvFeedback.details && (
+                  <div className="grid grid-cols-2 gap-2 text-xs text-emerald-900 dark:text-emerald-200 pt-1 font-mono">
+                    <div>Linhas processadas: <b>{csvFeedback.details.rows}</b></div>
+                    <div>Campanhas: <b>{csvFeedback.details.campaigns}</b></div>
+                    <div>Conjuntos: <b>{csvFeedback.details.adSets}</b></div>
+                    <div>Anúncios: <b>{csvFeedback.details.ads}</b></div>
+                    <div className="col-span-2 text-[11px] text-emerald-700 dark:text-emerald-400 pt-1 border-t border-emerald-200/60">
+                      Período: {csvFeedback.details.period} • Conta: {csvFeedback.details.account}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Feedback de Erro */}
+            {csvFeedback?.type === "error" && (
+              <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl flex items-center gap-2.5 text-xs text-rose-800 dark:text-rose-300">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{csvFeedback.message}</span>
+              </div>
+            )}
+
+            {/* Dropzone de Arquivo */}
+            <div className="space-y-3">
+              <label
+                htmlFor="meta-csv-file-input"
+                className="border-2 border-dashed border-slate-300 dark:border-[#142C52] hover:border-blue-500 dark:hover:border-blue-400 rounded-xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-[#061224]"
+              >
+                <UploadCloud className="w-8 h-8 text-blue-500 mb-2" />
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  {csvFile ? csvFile.name : "Clique para selecionar ou arraste o arquivo CSV"}
+                </span>
+                <span className="text-[11px] text-slate-400 mt-1">
+                  {csvFile
+                    ? `${(csvFile.size / 1024).toFixed(1)} KB selecionado`
+                    : "Exportado direto do Gerenciador de Anúncios com desagregação por Dia"}
+                </span>
+                <input
+                  id="meta-csv-file-input"
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      setCsvFile(f);
+                      setCsvFeedback(null);
+                    }
+                  }}
+                />
+              </label>
+
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-[#061224] p-3 rounded-lg border border-slate-100 dark:border-[#142C52]">
+                <p className="font-semibold text-slate-700 dark:text-slate-300">Como funciona a importação:</p>
+                <ul className="list-disc pl-4 mt-1 space-y-0.5 text-[10px]">
+                  <li>Popula instantaneamente os níveis de Campanhas, Conjuntos e Criativos.</li>
+                  <li>Grava os gastos, impressões, cliques e conversões dia a dia no banco.</li>
+                  <li>Não consome cota de requisições na Meta API.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setIsCsvModalOpen(false)}
+                className="flex-1 py-2.5 text-xs font-semibold border border-slate-200 dark:border-[#142C52] rounded-xl hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-700 dark:text-slate-300"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={() => csvFile && importCsvMutation.mutate(csvFile)}
+                disabled={!csvFile || importCsvMutation.isPending}
+                className="flex-1 py-2.5 text-xs bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              >
+                {importCsvMutation.isPending ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Importando...
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-3.5 h-3.5" /> Processar e Importar
+                  </>
+                )}
               </button>
             </div>
           </div>
