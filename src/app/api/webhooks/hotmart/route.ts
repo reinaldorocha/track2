@@ -12,6 +12,8 @@ import {
 } from '@/lib/integrations/normalizer'
 import { createSaleNotification, SaleNotificationType } from '@/lib/notifications/service'
 import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
+import { auth } from '@/lib/auth'
+import { getUserWorkspaceId } from '@/lib/workspace'
 
 export async function POST(req: Request) {
   let webhookEventId: string | null = null
@@ -26,11 +28,25 @@ export async function POST(req: Request) {
 
     const hottok = req.headers.get('x-hotmart-hottok') || searchParams.get('hottok') || (payload && typeof payload.hottok === 'string' ? payload.hottok : null)
 
+    let sessionWorkspaceId: string | null = null
+    const cookie = req.headers.get('cookie') || ''
+    if (cookie.includes('session-token')) {
+      try {
+        const session = await auth()
+        if (session?.user?.id) {
+          sessionWorkspaceId = await getUserWorkspaceId(session.user.id)
+        }
+      } catch {
+        // Fallback se fora de contexto de sessão
+      }
+    }
+
     const authResult = await authenticateWebhook({
       platform: 'hotmart',
       providedToken: hottok,
       queryWorkspaceId: queryWs,
-      globalEnvSecret: process.env.HOTMART_WEBHOOK_SECRET
+      globalEnvSecret: process.env.HOTMART_WEBHOOK_SECRET,
+      sessionWorkspaceId
     })
 
     if (!authResult.authorized) {

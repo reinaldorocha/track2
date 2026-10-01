@@ -90,6 +90,34 @@ export default function IntegrationsHubPage() {
     queryFn: () => fetch("/api/products").then((r) => r.json()),
   });
 
+  const { data: integrationsData } = useQuery({
+    queryKey: ["workspace-integrations"],
+    queryFn: () => fetch("/api/integrations").then((r) => r.json()),
+  });
+
+  const appUrl = typeof window !== "undefined" ? window.location.origin : "https://utm-track-navy.vercel.app";
+
+  const integrationsList: Array<{
+    id: string;
+    platform: string;
+    name: string;
+    webhookSecret: string;
+    webhookUrl: string;
+  }> = integrationsData?.integrations || [];
+
+  const getIntegrationByPlatform = (plat: string) =>
+    integrationsList.find((i) => i.platform.toLowerCase() === plat.toLowerCase());
+
+  const getWebhookUrlForPlatform = (plat: string, defaultPath: string) => {
+    const item = getIntegrationByPlatform(plat);
+    if (item?.webhookUrl) return item.webhookUrl;
+    if (item?.webhookSecret) {
+      const param = plat.toLowerCase() === "hotmart" ? `hottok=${item.webhookSecret}` : `token=${item.webhookSecret}`;
+      return `${appUrl}${defaultPath}?${param}`;
+    }
+    return `${appUrl}${defaultPath}`;
+  };
+
   // Mutações
   const updateProductPixelMutation = useMutation({
     mutationFn: async ({ productId, pixelId }: { productId: string; pixelId: string | null }) => {
@@ -187,9 +215,15 @@ export default function IntegrationsHubPage() {
     setTestStatus(`Executando teste de ${type}...`);
     try {
       if (type === "cakto") {
-        const res = await fetch("/api/webhooks/cakto", {
+        const item = getIntegrationByPlatform("cakto");
+        const secret = item?.webhookSecret;
+        const url = secret ? `/api/webhooks/cakto?token=${encodeURIComponent(secret)}` : "/api/webhooks/cakto";
+        const res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(secret ? { "x-cakto-signature": secret } : {}),
+          },
           body: JSON.stringify({
             id: `test_${Date.now()}`,
             status: "approved",
@@ -199,15 +233,22 @@ export default function IntegrationsHubPage() {
             utms: { source: "teste_integracao", campaign: "campanha_validacao" },
           }),
         });
-        const d = await res.json();
-        setTestStatus(res.ok ? "✅ Webhook Cakto respondeu com sucesso (HTTP 200)!" : `❌ Erro: ${d.error}`);
+        const d = await res.json().catch(() => ({}));
+        setTestStatus(res.ok ? "✅ Webhook Cakto respondeu com sucesso (HTTP 200)!" : `❌ Erro: ${d.error || 'Falha ao validar Cakto'}`);
       } else if (type === "hotmart") {
-        const res = await fetch("/api/webhooks/hotmart", {
+        const item = getIntegrationByPlatform("hotmart");
+        const secret = item?.webhookSecret;
+        const url = secret ? `/api/webhooks/hotmart?hottok=${encodeURIComponent(secret)}` : "/api/webhooks/hotmart";
+        const res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(secret ? { "x-hotmart-hottok": secret } : {}),
+          },
           body: JSON.stringify({
             id: `test_hotmart_${Date.now()}`,
             event: "PURCHASE_APPROVED",
+            hottok: secret,
             data: {
               purchase: {
                 transaction: `HP${Date.now()}`,
@@ -219,26 +260,40 @@ export default function IntegrationsHubPage() {
             },
           }),
         });
-        setTestStatus(res.ok ? "✅ Webhook Hotmart validado com sucesso (HTTP 200)!" : "❌ Erro ao validar Hotmart");
+        const d = await res.json().catch(() => ({}));
+        setTestStatus(res.ok ? "✅ Webhook Hotmart validado com sucesso (HTTP 200)!" : `❌ Erro: ${d.error || 'Falha ao validar Hotmart'}`);
       } else if (type === "kiwify") {
-        const res = await fetch("/api/webhooks/kiwify", {
+        const item = getIntegrationByPlatform("kiwify");
+        const secret = item?.webhookSecret;
+        const url = secret ? `/api/webhooks/kiwify?token=${encodeURIComponent(secret)}` : "/api/webhooks/kiwify";
+        const res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(secret ? { "x-kiwify-signature": secret } : {}),
+          },
           body: JSON.stringify({
             order_id: `test_kiwify_${Date.now()}`,
             order_status: "paid",
             order_amount: 19700,
             Commissions: { charge_amount: 19700, my_commission: 18000 },
             Customer: { email: "comprador@kiwify.com", mobile: "11999998888" },
+            Product: { product_id: "prod_kiwify_teste", product_name: "Produto Teste Kiwify" },
             TrackingParameters: { src: "facebook_ads", utm_source: "fb", utm_campaign: "campanha_teste" }
           }),
         });
         const d = await res.json().catch(() => ({}));
         setTestStatus(res.ok ? "✅ Webhook Kiwify validado com sucesso (HTTP 200)!" : `❌ Erro: ${d.error || 'Falha ao validar Kiwify'}`);
       } else if (type === "getfy") {
-        const res = await fetch("/api/webhooks/getfy", {
+        const item = getIntegrationByPlatform("getfy");
+        const secret = item?.webhookSecret;
+        const url = secret ? `/api/webhooks/getfy?token=${encodeURIComponent(secret)}` : "/api/webhooks/getfy";
+        const res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(secret ? { "Authorization": `Bearer ${secret}`, "x-getfy-signature": secret } : {}),
+          },
           body: JSON.stringify({
             event: "pedido_pago",
             event_label: "Pedido pago",
@@ -285,7 +340,6 @@ export default function IntegrationsHubPage() {
     setTimeout(() => setTestStatus(null), 6000);
   };
 
-  const appUrl = typeof window !== "undefined" ? window.location.origin : "https://utm-track-navy.vercel.app";
   const connectedAccountsCount = adAccountsData?.accounts?.length || 0;
   const pixels = pixelsData?.pixels || [];
   const products = productsData?.products || [];
@@ -491,11 +545,11 @@ export default function IntegrationsHubPage() {
                   <input
                     type="text"
                     readOnly
-                    value={`${appUrl}/api/webhooks/hotmart`}
+                    value={getWebhookUrlForPlatform("hotmart", "/api/webhooks/hotmart")}
                     className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
                   />
                   <button
-                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/hotmart`, "hotmart")}
+                    onClick={() => copyToClipboard(getWebhookUrlForPlatform("hotmart", "/api/webhooks/hotmart"), "hotmart")}
                     className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
                     title="Copiar URL"
                   >
@@ -504,7 +558,7 @@ export default function IntegrationsHubPage() {
                 </div>
               </div>
               <div className="pt-2 flex justify-between items-center text-xs">
-                <span className="text-slate-400 text-[11px]">Header: x-hotmart-hottok</span>
+                <span className="text-slate-400 text-[11px]">Hottok na URL ou Header x-hotmart-hottok</span>
                 <button
                   onClick={() => runIntegrationTest("hotmart")}
                   className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
@@ -536,11 +590,11 @@ export default function IntegrationsHubPage() {
                   <input
                     type="text"
                     readOnly
-                    value={`${appUrl}/api/webhooks/cakto`}
+                    value={getWebhookUrlForPlatform("cakto", "/api/webhooks/cakto")}
                     className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
                   />
                   <button
-                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/cakto`, "cakto")}
+                    onClick={() => copyToClipboard(getWebhookUrlForPlatform("cakto", "/api/webhooks/cakto"), "cakto")}
                     className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
                     title="Copiar URL"
                   >
@@ -549,7 +603,7 @@ export default function IntegrationsHubPage() {
                 </div>
               </div>
               <div className="pt-2 flex justify-between items-center text-xs">
-                <span className="text-slate-400 text-[11px]">Header: x-cakto-signature</span>
+                <span className="text-slate-400 text-[11px]">Token na URL ou Header x-cakto-signature</span>
                 <button
                   onClick={() => runIntegrationTest("cakto")}
                   className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
@@ -581,11 +635,11 @@ export default function IntegrationsHubPage() {
                   <input
                     type="text"
                     readOnly
-                    value={`${appUrl}/api/webhooks/yampi`}
+                    value={getWebhookUrlForPlatform("yampi", "/api/webhooks/yampi")}
                     className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
                   />
                   <button
-                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/yampi`, "yampi")}
+                    onClick={() => copyToClipboard(getWebhookUrlForPlatform("yampi", "/api/webhooks/yampi"), "yampi")}
                     className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
                     title="Copiar URL"
                   >
@@ -594,7 +648,7 @@ export default function IntegrationsHubPage() {
                 </div>
               </div>
               <div className="pt-2 flex justify-between items-center text-xs">
-                <span className="text-slate-400 text-[11px]">Header: Authorization (Bearer)</span>
+                <span className="text-slate-400 text-[11px]">Token na URL ou Header Authorization (Bearer)</span>
                 <span className="text-emerald-600 font-semibold">Idempotente</span>
               </div>
             </div>
@@ -621,11 +675,11 @@ export default function IntegrationsHubPage() {
                   <input
                     type="text"
                     readOnly
-                    value={`${appUrl}/api/webhooks/shopify`}
+                    value={getWebhookUrlForPlatform("shopify", "/api/webhooks/shopify")}
                     className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
                   />
                   <button
-                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/shopify`, "shopify")}
+                    onClick={() => copyToClipboard(getWebhookUrlForPlatform("shopify", "/api/webhooks/shopify"), "shopify")}
                     className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
                     title="Copiar URL"
                   >
@@ -634,7 +688,7 @@ export default function IntegrationsHubPage() {
                 </div>
               </div>
               <div className="pt-2 flex justify-between items-center text-xs">
-                <span className="text-slate-400 text-[11px]">Header: x-shopify-hmac-sha256</span>
+                <span className="text-slate-400 text-[11px]">Workspace na URL & HMAC Validado</span>
                 <span className="text-emerald-600 font-semibold">HMAC Validado</span>
               </div>
             </div>
@@ -661,11 +715,11 @@ export default function IntegrationsHubPage() {
                   <input
                     type="text"
                     readOnly
-                    value={`${appUrl}/api/webhooks/kiwify`}
+                    value={getWebhookUrlForPlatform("kiwify", "/api/webhooks/kiwify")}
                     className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
                   />
                   <button
-                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/kiwify`, "kiwify")}
+                    onClick={() => copyToClipboard(getWebhookUrlForPlatform("kiwify", "/api/webhooks/kiwify"), "kiwify")}
                     className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
                     title="Copiar URL"
                   >
@@ -674,7 +728,7 @@ export default function IntegrationsHubPage() {
                 </div>
               </div>
               <div className="pt-2 flex justify-between items-center text-xs">
-                <span className="text-slate-400 text-[11px]">Dica: Cole em Apps → Webhooks</span>
+                <span className="text-slate-400 text-[11px]">Dica: Cole em Apps → Webhooks (Token já embutido)</span>
                 <button
                   onClick={() => runIntegrationTest("kiwify")}
                   className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
@@ -706,11 +760,11 @@ export default function IntegrationsHubPage() {
                   <input
                     type="text"
                     readOnly
-                    value={`${appUrl}/api/webhooks/getfy`}
+                    value={getWebhookUrlForPlatform("getfy", "/api/webhooks/getfy")}
                     className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-xs font-mono text-slate-800 dark:text-slate-200"
                   />
                   <button
-                    onClick={() => copyToClipboard(`${appUrl}/api/webhooks/getfy`, "getfy")}
+                    onClick={() => copyToClipboard(getWebhookUrlForPlatform("getfy", "/api/webhooks/getfy"), "getfy")}
                     className="p-2 border border-slate-200 dark:border-[#142C52] rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] text-slate-600 dark:text-slate-300"
                     title="Copiar URL"
                   >
@@ -719,7 +773,7 @@ export default function IntegrationsHubPage() {
                 </div>
               </div>
               <div className="pt-2 flex justify-between items-center text-xs">
-                <span className="text-slate-400 text-[11px]">Header: Authorization (Bearer) ou ?token=</span>
+                <span className="text-slate-400 text-[11px]">Token já embutido na URL (?token=...)</span>
                 <button
                   onClick={() => runIntegrationTest("getfy")}
                   className="text-blue-600 dark:text-blue-400 font-bold hover:underline"

@@ -10,6 +10,8 @@ import {
 } from '@/lib/integrations/normalizer'
 import { createSaleNotification, SaleNotificationType } from '@/lib/notifications/service'
 import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
+import { auth } from '@/lib/auth'
+import { getUserWorkspaceId } from '@/lib/workspace'
 
 export async function POST(req: Request) {
   try {
@@ -19,11 +21,25 @@ export async function POST(req: Request) {
     const authHeader = req.headers.get('Authorization')
     const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : (searchParams.get('token') || searchParams.get('signature'))
 
+    let sessionWorkspaceId: string | null = null
+    const cookie = req.headers.get('cookie') || ''
+    if (cookie.includes('session-token')) {
+      try {
+        const session = await auth()
+        if (session?.user?.id) {
+          sessionWorkspaceId = await getUserWorkspaceId(session.user.id)
+        }
+      } catch {
+        // Fallback se fora de contexto de sessão
+      }
+    }
+
     const authResult = await authenticateWebhook({
       platform: 'yampi',
       providedToken: token,
       queryWorkspaceId: queryWs,
-      globalEnvSecret: process.env.YAMPI_WEBHOOK_SECRET
+      globalEnvSecret: process.env.YAMPI_WEBHOOK_SECRET,
+      sessionWorkspaceId
     })
 
     if (!authResult.authorized) {

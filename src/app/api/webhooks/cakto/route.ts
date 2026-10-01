@@ -10,6 +10,8 @@ import {
 } from '@/lib/integrations/normalizer'
 import { createSaleNotification, SaleNotificationType } from '@/lib/notifications/service'
 import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
+import { auth } from '@/lib/auth'
+import { getUserWorkspaceId } from '@/lib/workspace'
 
 export async function POST(req: Request) {
   try {
@@ -20,11 +22,25 @@ export async function POST(req: Request) {
     const bearer = authHeader?.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : authHeader
     const signature = req.headers.get('x-cakto-signature') || req.headers.get('x-cacto-signature') || searchParams.get('token') || searchParams.get('signature') || bearer
 
+    let sessionWorkspaceId: string | null = null
+    const cookie = req.headers.get('cookie') || ''
+    if (cookie.includes('session-token')) {
+      try {
+        const session = await auth()
+        if (session?.user?.id) {
+          sessionWorkspaceId = await getUserWorkspaceId(session.user.id)
+        }
+      } catch {
+        // Fallback se fora de contexto de sessão
+      }
+    }
+
     const authResult = await authenticateWebhook({
       platform: 'cakto',
       providedToken: signature,
       queryWorkspaceId: queryWs,
-      globalEnvSecret: process.env.CAKTO_WEBHOOK_SECRET || process.env.CACTO_WEBHOOK_SECRET
+      globalEnvSecret: process.env.CAKTO_WEBHOOK_SECRET || process.env.CACTO_WEBHOOK_SECRET,
+      sessionWorkspaceId
     })
 
     if (!authResult.authorized) {
