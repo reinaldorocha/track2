@@ -99,6 +99,7 @@ export default function IntegrationsHubPage() {
 
   const integrationsList: Array<{
     id: string;
+    workspaceId?: string;
     platform: string;
     name: string;
     webhookSecret: string;
@@ -110,12 +111,21 @@ export default function IntegrationsHubPage() {
 
   const getWebhookUrlForPlatform = (plat: string, defaultPath: string) => {
     const item = getIntegrationByPlatform(plat);
-    if (item?.webhookUrl) return item.webhookUrl;
-    if (item?.webhookSecret) {
-      const param = plat.toLowerCase() === "hotmart" ? `hottok=${item.webhookSecret}` : `token=${item.webhookSecret}`;
-      return `${appUrl}${defaultPath}?${param}`;
+    const token = item?.webhookSecret;
+    const base = appUrl.replace(/\/+$/, "");
+
+    if (plat.toLowerCase() === "shopify") {
+      const wsId = item?.workspaceId || "";
+      return `${base}/api/webhooks/shopify${wsId ? `?workspaceId=${wsId}` : ""}`;
     }
-    return `${appUrl}${defaultPath}`;
+
+    if (plat.toLowerCase() === "hotmart") {
+      return token ? `${base}/api/webhooks/hotmart?hottok=${token}` : `${base}/api/webhooks/hotmart`;
+    }
+
+    return token
+      ? `${base}/api/webhooks/${plat.toLowerCase()}?token=${token}`
+      : `${base}/api/webhooks/${plat.toLowerCase()}`;
   };
 
   // Mutações

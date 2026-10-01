@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { getUserWorkspaceId } from '@/lib/workspace'
 import { getOrCreateWorkspaceIntegrations, rotateIntegrationSecret } from '@/lib/integrations/service'
@@ -15,7 +15,9 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'No workspace' }, { status: 404 })
     }
 
-    const { origin } = new URL(req.url)
+    const host = req.headers.get('x-forwarded-host') || req.headers.get('host')
+    const proto = req.headers.get('x-forwarded-proto') || (host?.includes('localhost') ? 'http' : 'https')
+    const origin = process.env.NEXT_PUBLIC_APP_URL || (host ? `${proto}://${host}` : new URL(req.url).origin)
     const integrations = await getOrCreateWorkspaceIntegrations(workspaceId, origin)
 
     return NextResponse.json({
@@ -44,7 +46,9 @@ export async function POST(req: Request) {
     const { action, platform } = body
 
     if (action === 'rotate' && platform) {
-      const { origin } = new URL(req.url)
+      const host = req.headers.get('x-forwarded-host') || req.headers.get('host')
+      const proto = req.headers.get('x-forwarded-proto') || (host?.includes('localhost') ? 'http' : 'https')
+      const origin = process.env.NEXT_PUBLIC_APP_URL || (host ? `${proto}://${host}` : new URL(req.url).origin)
       const updated = await rotateIntegrationSecret(workspaceId, platform, origin)
       return NextResponse.json({
         success: true,
