@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -19,6 +19,8 @@ import {
   Calendar,
   X,
   Sparkles,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
@@ -78,11 +80,17 @@ type SalesResponse = {
 };
 
 export default function SalesPage() {
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [search, setSearch] = useState<string>("");
   const [selectedSale, setSelectedSale] = useState<SaleItem | null>(null);
   const [viewMode, setViewMode] = useState<"feed" | "hourly">("feed");
+
+  // Estados para exclusão
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [saleToDelete, setSaleToDelete] = useState<SaleItem | null>(null);
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
 
   const { data, isLoading } = useQuery<SalesResponse>({
     queryKey: ["sales-list", statusFilter, platformFilter, search],
@@ -97,6 +105,57 @@ export default function SalesPage() {
     },
     refetchInterval: 8000,
   });
+
+  const deleteSingleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/sales/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Erro ao excluir venda");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sales-list"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
+      setSaleToDelete(null);
+      setSelectedSale(null);
+    },
+  });
+
+  const deleteBulkMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await fetch("/api/sales", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error("Erro ao excluir vendas");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sales-list"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
+      setSelectedIds([]);
+      setShowBulkConfirm(false);
+    },
+  });
+
+  const handleToggleSelectAll = () => {
+    if (!data?.sales) return;
+    if (selectedIds.length === data.sales.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(data.sales.map((s) => s.id));
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
 
   const stats = data?.stats || {
     totalGross: 0,
@@ -342,12 +401,46 @@ export default function SalesPage() {
         </div>
       </div>
 
+      {/* Bulk Action Bar */}
+      {selectedIds.length > 0 && (
+        <div className="flex items-center justify-between p-3.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl text-xs animate-in fade-in">
+          <div className="flex items-center gap-2 text-red-800 dark:text-red-200 font-bold">
+            <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+            <span>{selectedIds.length} venda(s) selecionada(s)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedIds([])}
+              className="px-3 py-1.5 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 rounded-lg transition font-medium"
+            >
+              Cancelar Seleção
+            </button>
+            <button
+              onClick={() => setShowBulkConfirm(true)}
+              className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg shadow-sm transition flex items-center gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Excluir Selecionadas
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Sales Table */}
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-gray-50 dark:bg-gray-800/70 border-b border-gray-200 dark:border-gray-800 text-gray-500 uppercase tracking-wider font-semibold">
               <tr>
+                <th className="p-3.5 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(data?.sales && data.sales.length > 0 && selectedIds.length === data.sales.length)}
+                    onChange={handleToggleSelectAll}
+                    className="rounded border-gray-300 dark:border-gray-700 text-[#0066FF] focus:ring-[#0066FF] cursor-pointer"
+                    title="Selecionar todas"
+                  />
+                </th>
                 <th className="p-3.5">Status</th>
                 <th className="p-3.5">Data / Hora</th>
                 <th className="p-3.5">Plataforma</th>
@@ -361,7 +454,7 @@ export default function SalesPage() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-gray-400">
+                  <td colSpan={9} className="p-8 text-center text-gray-400">
                     <div className="animate-pulse space-y-2">
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/3 mx-auto" />
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/2 mx-auto" />
@@ -370,7 +463,7 @@ export default function SalesPage() {
                 </tr>
               ) : !data?.sales || data.sales.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-12 text-center text-gray-500">
+                  <td colSpan={9} className="p-12 text-center text-gray-500">
                     <ShoppingBag className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
                     <p className="font-semibold text-gray-700 dark:text-gray-300">Nenhuma venda encontrada</p>
                     <p className="text-xs text-gray-400 mt-1">
@@ -381,11 +474,22 @@ export default function SalesPage() {
               ) : (
                 data.sales.map((sale) => {
                   const attribution = sale.attributionRecord;
+                  const isSelected = selectedIds.includes(sale.id);
                   return (
                     <tr
                       key={sale.id}
-                      className="hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors"
+                      className={`hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors ${
+                        isSelected ? "bg-red-50/30 dark:bg-red-950/20" : ""
+                      }`}
                     >
+                      <td className="p-3.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelect(sale.id)}
+                          className="rounded border-gray-300 dark:border-gray-700 text-[#0066FF] focus:ring-[#0066FF] cursor-pointer"
+                        />
+                      </td>
                       <td className="p-3.5">{getStatusBadge(sale.status)}</td>
                       <td className="p-3.5 text-gray-600 dark:text-gray-300 whitespace-nowrap">
                         {formatDateTime(sale.orderedAt)}
@@ -425,12 +529,21 @@ export default function SalesPage() {
                         )}
                       </td>
                       <td className="p-3.5 text-right">
-                        <button
-                          onClick={() => setSelectedSale(sale)}
-                          className="px-2.5 py-1 text-xs font-semibold text-[#0066FF] dark:text-[#00D4FF] hover:bg-sky-50 dark:hover:bg-sky-950/40 rounded transition"
-                        >
-                          Detalhes
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setSelectedSale(sale)}
+                            className="px-2.5 py-1 text-xs font-semibold text-[#0066FF] dark:text-[#00D4FF] hover:bg-sky-50 dark:hover:bg-sky-950/40 rounded transition"
+                          >
+                            Detalhes
+                          </button>
+                          <button
+                            onClick={() => setSaleToDelete(sale)}
+                            className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded transition"
+                            title="Excluir Venda"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -545,17 +658,121 @@ export default function SalesPage() {
             </div>
 
             <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
-              <Link
-                href={`/sales/${selectedSale.id}`}
-                className="text-xs text-[#0066FF] hover:underline flex items-center gap-1 font-semibold"
-              >
-                Abrir em Página Própria <ExternalLink className="w-3.5 h-3.5" />
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link
+                  href={`/sales/${selectedSale.id}`}
+                  className="text-xs text-[#0066FF] hover:underline flex items-center gap-1 font-semibold"
+                >
+                  Abrir em Página Própria <ExternalLink className="w-3.5 h-3.5" />
+                </Link>
+                <button
+                  onClick={() => {
+                    const toDel = selectedSale;
+                    setSelectedSale(null);
+                    setSaleToDelete(toDel);
+                  }}
+                  className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 font-semibold flex items-center gap-1 transition"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Excluir Venda
+                </button>
+              </div>
               <button
                 onClick={() => setSelectedSale(null)}
                 className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-xs font-semibold rounded-lg hover:bg-gray-200"
               >
                 Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão Individual */}
+      {saleToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full border border-gray-200 dark:border-gray-800 shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Excluir Venda?
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Esta ação não pode ser revertida.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800 text-xs space-y-1">
+              <div><strong className="text-gray-700 dark:text-gray-300">ID Pedido / Transação:</strong> {saleToDelete.externalId}</div>
+              <div><strong className="text-gray-700 dark:text-gray-300">Plataforma:</strong> {saleToDelete.platform.toUpperCase()}</div>
+              <div><strong className="text-gray-700 dark:text-gray-300">Valor Bruto:</strong> {formatCurrency(saleToDelete.grossAmount, saleToDelete.currency)}</div>
+              <div><strong className="text-gray-700 dark:text-gray-300">Data:</strong> {formatDateTime(saleToDelete.orderedAt)}</div>
+            </div>
+
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              A venda e suas métricas atribuídas serão permanentemente removidas do sistema e dos cálculos do painel.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setSaleToDelete(null)}
+                disabled={deleteSingleMutation.isPending}
+                className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-semibold rounded-lg hover:bg-gray-200 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteSingleMutation.mutate(saleToDelete.id)}
+                disabled={deleteSingleMutation.isPending}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center gap-1.5"
+              >
+                {deleteSingleMutation.isPending ? "Excluindo..." : "Sim, Excluir"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão em Lote */}
+      {showBulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full border border-gray-200 dark:border-gray-800 shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Excluir {selectedIds.length} Vendas?
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Esta ação removerá todos os registros selecionados.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+              Você selecionou <strong className="text-red-600 dark:text-red-400">{selectedIds.length} venda(s)</strong> para exclusão. 
+              As vendas, itens associados e métricas financeiras serão expurgadas do seu workspace.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowBulkConfirm(false)}
+                disabled={deleteBulkMutation.isPending}
+                className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-semibold rounded-lg hover:bg-gray-200 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteBulkMutation.mutate(selectedIds)}
+                disabled={deleteBulkMutation.isPending}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center gap-1.5"
+              >
+                {deleteBulkMutation.isPending ? "Excluindo..." : `Excluir ${selectedIds.length} Vendas`}
               </button>
             </div>
           </div>

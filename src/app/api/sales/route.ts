@@ -141,3 +141,77 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }
+
+export async function DELETE(req: Request) {
+  try {
+    const session = await auth()
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const workspaceId = await getUserWorkspaceId(session.user.id)
+    if (!workspaceId) {
+      return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
+    }
+
+    const body = await req.json().catch(() => ({}))
+    const ids: string[] = Array.isArray(body?.ids) ? body.ids : []
+
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'Nenhum ID de venda fornecido' }, { status: 400 })
+    }
+
+    // Busca vendas válidas que pertencem ao workspace
+    const validSales = await prisma.sale.findMany({
+      where: {
+        id: { in: ids },
+        workspaceId,
+      },
+      select: { id: true },
+    })
+
+    const validIds = validSales.map((s) => s.id)
+
+    if (validIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        deletedCount: 0,
+        message: 'Nenhuma venda encontrada para exclusão',
+      })
+    }
+
+    // Deleta notificações vinculadas
+    await prisma.notification.deleteMany({
+      where: {
+        saleId: { in: validIds },
+        workspaceId,
+      },
+    })
+
+    // Deleta itens e atribuição
+    await prisma.saleItem.deleteMany({
+      where: { saleId: { in: validIds } },
+    })
+
+    await prisma.attributionRecord.deleteMany({
+      where: { saleId: { in: validIds } },
+    })
+
+    // Deleta as vendas
+    const deleteResult = await prisma.sale.deleteMany({
+      where: {
+        id: { in: validIds },
+        workspaceId,
+      },
+    })
+
+    return NextResponse.json({
+      success: true,
+      deletedCount: deleteResult.count,
+      message: `${deleteResult.count} venda(s) excluída(s) com sucesso`,
+    })
+  } catch (error) {
+    console.error('Error batch deleting sales:', error)
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+  }
+}

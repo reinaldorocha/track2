@@ -77,3 +77,54 @@ export async function GET(
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth()
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const workspaceId = await getUserWorkspaceId(session.user.id)
+    if (!workspaceId) {
+      return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
+    }
+
+    const { id } = await params
+
+    const sale = await prisma.sale.findFirst({
+      where: {
+        id,
+        workspaceId,
+      },
+    })
+
+    if (!sale) {
+      return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
+    }
+
+    // Remove notificacoes associadas
+    await prisma.notification.deleteMany({
+      where: {
+        saleId: id,
+        workspaceId,
+      },
+    })
+
+    // Remove a venda (itens e atribuicao sao removidos em cascata)
+    await prisma.sale.delete({
+      where: { id },
+    })
+
+    return NextResponse.json({
+      success: true,
+      message: 'Venda excluída com sucesso',
+    })
+  } catch (error) {
+    console.error('Error deleting sale:', error)
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+  }
+}

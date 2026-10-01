@@ -1,7 +1,8 @@
 "use client";
 
-import { use } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { use, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -15,6 +16,8 @@ import {
   Link2,
   Calendar,
   Share2,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
@@ -26,6 +29,9 @@ export default function SaleDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["sale-detail", id],
@@ -33,6 +39,21 @@ export default function SaleDetailPage({
       const res = await fetch(`/api/sales/${id}`);
       if (!res.ok) throw new Error("Venda não encontrada");
       return res.json();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/sales/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Erro ao excluir venda");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sales-list"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
+      router.push("/sales");
     },
   });
 
@@ -121,12 +142,20 @@ export default function SaleDetailPage({
         >
           <ArrowLeft className="w-4 h-4" /> Voltar para Lista de Vendas
         </Link>
-        <button
-          onClick={() => playNotificationSound(getSoundForStatus(sale.status))}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-50 dark:bg-sky-950/50 text-[#0066FF] dark:text-[#00D4FF] border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition"
-        >
-          <Volume2 className="w-4 h-4" /> Tocar Alerta Sonoro
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => playNotificationSound(getSoundForStatus(sale.status))}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-50 dark:bg-sky-950/50 text-[#0066FF] dark:text-[#00D4FF] border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition"
+          >
+            <Volume2 className="w-4 h-4" /> Tocar Alerta Sonoro
+          </button>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900 hover:bg-red-100 transition"
+          >
+            <Trash2 className="w-4 h-4" /> Excluir Venda
+          </button>
+        </div>
       </div>
 
       {/* Hero Card */}
@@ -264,6 +293,55 @@ export default function SaleDetailPage({
           )}
         </div>
       </div>
+
+      {/* Modal de Confirmação de Exclusão */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-md w-full border border-gray-200 dark:border-gray-800 shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Excluir esta venda?
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Esta ação é irreversível e removerá todos os dados do pedido #{sale.externalId}.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800 text-xs space-y-1">
+              <div><strong className="text-gray-700 dark:text-gray-300">ID Pedido / Transação:</strong> {sale.externalId}</div>
+              <div><strong className="text-gray-700 dark:text-gray-300">Plataforma:</strong> {sale.platform.toUpperCase()}</div>
+              <div><strong className="text-gray-700 dark:text-gray-300">Valor Bruto:</strong> {formatCurrency(sale.grossAmount, sale.currency)}</div>
+              <div><strong className="text-gray-700 dark:text-gray-300">Data:</strong> {formatDateTime(sale.orderedAt)}</div>
+            </div>
+
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              A venda, notificações e métricas financeiras associadas serão permanentemente removidas do workspace.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleteMutation.isPending}
+                className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-semibold rounded-lg hover:bg-gray-200 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center gap-1.5"
+              >
+                {deleteMutation.isPending ? "Excluindo..." : "Sim, Excluir Venda"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
