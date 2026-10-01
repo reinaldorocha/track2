@@ -12,7 +12,7 @@
 - [x] Totais e moedas na interface.
 - [x] 237 testes automatizados, lint dos arquivos alterados, checagem de tipos, schema PostgreSQL e build local.
 - [ ] Comparação com Meta e PostgreSQL de produção.
-- [ ] Novo PR de entrega.
+- [x] PR #2 aberto em rascunho com código, testes e limitações documentadas.
 
 ## Diagnóstico verificável
 
