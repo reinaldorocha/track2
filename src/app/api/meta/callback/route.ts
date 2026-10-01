@@ -22,9 +22,20 @@ export async function GET(request: Request) {
   const errorDescription = searchParams.get('error_description')
   const errorReason = searchParams.get('error_reason')
 
+  console.log('[Meta Callback] URL recebida:', request.url)
+  console.log('[Meta Callback] Query params:', {
+    hasCode: Boolean(code),
+    codePrefix: code ? `${code.substring(0, 8)}...` : null,
+    hasState: Boolean(state),
+    error,
+    errorDescription,
+    errorReason,
+  })
+
   // 1. Tratar cancelamento ou negação de permissão pelo usuário na Meta
   if (error || !code) {
     const reason = errorDescription || errorReason || error || 'Autorização cancelada ou código ausente'
+    console.warn('[Meta Callback] Redirecionando com erro:', reason)
     return NextResponse.redirect(
       new URL(`/meta-ads?error=${encodeURIComponent(reason)}`, baseUrl)
     )
