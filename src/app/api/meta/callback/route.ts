@@ -9,10 +9,12 @@ import {
   exchangeCodeForToken,
   exchangeForLongLivedToken,
   getMetaRedirectUri,
+  getAppBaseUrl,
 } from '@/lib/meta/oauth'
 
 
 export async function GET(request: Request) {
+  const baseUrl = getAppBaseUrl(request)
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
   const state = searchParams.get('state')
@@ -24,7 +26,7 @@ export async function GET(request: Request) {
   if (error || !code) {
     const reason = errorDescription || errorReason || error || 'Autorização cancelada ou código ausente'
     return NextResponse.redirect(
-      new URL(`/meta-ads?error=${encodeURIComponent(reason)}`, request.url)
+      new URL(`/meta-ads?error=${encodeURIComponent(reason)}`, baseUrl)
     )
   }
 
@@ -34,7 +36,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(
       new URL(
         `/meta-ads?error=${encodeURIComponent(stateVerification.error || 'State de segurança inválido')}`,
-        request.url
+        baseUrl
       )
     )
   }
@@ -43,13 +45,13 @@ export async function GET(request: Request) {
   const session = await auth()
   const userId = session?.user?.id || stateVerification.userId
   if (!userId) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return NextResponse.redirect(new URL('/login', baseUrl))
   }
 
   const workspaceId =
     stateVerification.workspaceId || (await getUserWorkspaceId(userId))
   if (!workspaceId) {
-    return NextResponse.redirect(new URL('/meta-ads?error=no_workspace', request.url))
+    return NextResponse.redirect(new URL('/meta-ads?error=no_workspace', baseUrl))
   }
 
   const appId = process.env.META_APP_ID
@@ -57,7 +59,7 @@ export async function GET(request: Request) {
 
   if (!appId || !appSecret) {
     return NextResponse.redirect(
-      new URL('/meta-ads?error=meta_not_configured', request.url)
+      new URL('/meta-ads?error=meta_not_configured', baseUrl)
     )
   }
 
@@ -123,7 +125,7 @@ export async function GET(request: Request) {
 
     // 9. Redireciona para /meta-ads com modal de seleção e confirmação
     return NextResponse.redirect(
-      new URL('/meta-ads?status=oauth_success&select_accounts=true', request.url)
+      new URL('/meta-ads?status=oauth_success&select_accounts=true', baseUrl)
     )
   } catch (err: unknown) {
     const errorDetail =
@@ -132,7 +134,7 @@ export async function GET(request: Request) {
         : 'Falha durante o processamento do callback Meta'
     console.error('Meta OAuth callback error:', err)
     return NextResponse.redirect(
-      new URL(`/meta-ads?error=${encodeURIComponent(errorDetail)}`, request.url)
+      new URL(`/meta-ads?error=${encodeURIComponent(errorDetail)}`, baseUrl)
     )
   }
 }
