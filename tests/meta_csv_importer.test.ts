@@ -84,4 +84,38 @@ describe('Meta Ads — Importador de Relatório Histórico via CSV', () => {
     assert.equal(result.success, false)
     assert.ok(result.error?.includes('Colunas obrigatórias'))
   })
+
+  it('4. Sobrescreve dados parciais/incompletos de sincronização anterior sem duplicar', async () => {
+    const campaigns = await prisma.campaign.findMany({ where: { workspaceId: testWorkspaceId } })
+    const simulado = campaigns.find(c => c.name === 'SIMULADO 04/09')!
+
+    // Simular que uma sincronização anterior pela metade salvou um dado errado/incompleto
+    await prisma.campaignInsight.updateMany({
+      where: { campaignId: simulado.id },
+      data: { spend: 5.00, conversions: 0 }
+    })
+
+    // Reimportar o CSV
+    const result = await importMetaAdsCsv(testWorkspaceId, sampleCsv)
+    assert.equal(result.success, true)
+
+    // O valor deve ter sido sobrescrito com o total real do CSV (21.01 e 2 compras) e continuar com exatamente 1 insight
+    const insights = await prisma.campaignInsight.findMany({
+      where: { campaignId: simulado.id }
+    })
+    assert.equal(insights.length, 1)
+    assert.equal(Math.round(insights[0].spend * 100) / 100, 21.01)
+    assert.equal(insights[0].conversions, 2)
+
+    // Validar que o SyncLog foi gravado como sucesso cobrindo o período
+    const syncLog = await prisma.syncLog.findFirst({
+      where: { workspaceId: testWorkspaceId, type: 'meta_ads' },
+      orderBy: { startedAt: 'desc' }
+    })
+    assert.equal(syncLog?.status, 'success')
+    const details = JSON.parse(syncLog?.details || '{}')
+    assert.equal(details.since, '2026-10-01')
+    assert.equal(details.until, '2026-10-01')
+    assert.equal(details.source, 'csv_import')
+  })
 })

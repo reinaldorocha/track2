@@ -487,6 +487,45 @@ export async function importMetaAdsCsv(
     dbAdMap.set(extId, dbAd.id)
   }
 
+  // 4.1. Limpeza preventiva de dados parciais/incompletos:
+  // Se houve sincronização via API que foi interrompida ou salvou dados pela metade
+  // para essas campanhas/conjuntos/anúncios dentro do período deste CSV, removemos esses
+  // registros parciais para que o CSV oficial consolide e sobrescreva 100% dos dados.
+  const [minY, minM, minD] = minDate.split('-').map(Number)
+  const [maxY, maxM, maxD] = maxDate.split('-').map(Number)
+  const rangeStart = new Date(Date.UTC(minY, minM - 1, minD, 0, 0, 0, 0))
+  const rangeStop = new Date(Date.UTC(maxY, maxM - 1, maxD, 23, 59, 59, 999))
+
+  const campaignDbIds = Array.from(dbCampaignMap.values())
+  if (campaignDbIds.length > 0) {
+    await prisma.campaignInsight.deleteMany({
+      where: {
+        campaignId: { in: campaignDbIds },
+        dateStart: { gte: rangeStart, lte: rangeStop }
+      }
+    })
+  }
+
+  const adSetDbIds = Array.from(dbAdSetMap.values())
+  if (adSetDbIds.length > 0) {
+    await prisma.adSetInsight.deleteMany({
+      where: {
+        adSetId: { in: adSetDbIds },
+        dateStart: { gte: rangeStart, lte: rangeStop }
+      }
+    })
+  }
+
+  const adDbIds = Array.from(dbAdMap.values())
+  if (adDbIds.length > 0) {
+    await prisma.adInsight.deleteMany({
+      where: {
+        adId: { in: adDbIds },
+        dateStart: { gte: rangeStart, lte: rangeStop }
+      }
+    })
+  }
+
   let insightsCount = 0
 
   // 5. Gravar Campaign Insights diários
@@ -675,6 +714,30 @@ export async function importMetaAdsCsv(
   await prisma.adAccount.update({
     where: { id: adAccount.id },
     data: { lastSyncAt: new Date() }
+  })
+
+  // Registrar log de sincronização bem-sucedida para o período do CSV
+  // Isso garante que hasCompleteCoverage aprove o período no dashboard
+  await prisma.syncLog.create({
+    data: {
+      workspaceId,
+      adAccountId: adAccount.id,
+      type: 'meta_ads',
+      status: 'success',
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      itemsTotal: rowsCount,
+      itemsProcessed: rowsCount,
+      itemsFailed: 0,
+      details: JSON.stringify({
+        since: minDate,
+        until: maxDate,
+        source: 'csv_import',
+        campaigns: campaignsMap.size,
+        adSets: adSetsMap.size,
+        ads: adsMap.size
+      })
+    }
   })
 
   return {
