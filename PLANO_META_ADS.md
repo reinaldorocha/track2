@@ -13,6 +13,10 @@
 - [x] Testes automatizados, lint dos arquivos alterados, checagem de tipos, schema PostgreSQL e build local.
 - [ ] Comparação com Meta e PostgreSQL de produção.
 - [x] PR #2 aberto em rascunho com código, testes e limitações documentadas.
+- [x] Limite da Meta: conjuntos e anúncios consultados por conta, sem uma chamada por campanha ou conjunto.
+- [x] Limite da Meta: interromper no primeiro erro de cota, aguardar 60 minutos antes de nova tentativa e resumir o aviso na interface.
+- [x] Testes locais do fluxo de limite e da coleta por conta.
+- [ ] Confirmar na VPS, após a publicação, que a conta conectada conclui o sync e que os dados conferem com a Meta.
 
 ## Diagnóstico verificável
 

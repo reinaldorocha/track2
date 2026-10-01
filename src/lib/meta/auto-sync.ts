@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { syncAdAccount } from './sync'
+import { metaCooldownRemaining, summarizeMetaSyncError, META_RATE_LIMIT_COOLDOWN_MS } from './rate-limit'
 
 export interface AutoSyncStatus {
   enabled: boolean
@@ -68,7 +69,7 @@ export async function getAutoSyncStatus(
     totalAccounts,
     activeAccounts: activeCount,
     activeAccountNames: activeAccounts.map((a) => a.name),
-    lastError: latestLog?.status === 'partial' || latestLog?.status === 'failed' ? latestLog.errorMessage : null,
+    lastError: latestLog?.status === 'partial' || latestLog?.status === 'failed' ? summarizeMetaSyncError(latestLog.errorMessage) : null,
   }
 }
 
@@ -114,17 +115,37 @@ export async function triggerBackgroundMetaSyncIfNeeded(
       return { triggered: false, reason: 'up_to_date' }
     }
 
-    const accountIdsToSync = staleAccounts.map((a) => a.id)
+    const recentLogs = await prisma.syncLog.findMany({
+      where: { workspaceId, type: 'meta_ads', status: { in: ['success', 'partial', 'failed'] },
+        startedAt: { gte: new Date(Date.now() - META_RATE_LIMIT_COOLDOWN_MS) } },
+      orderBy: { startedAt: 'desc' },
+      select: { adAccountId: true, startedAt: true, errorMessage: true },
+    })
+    const latestByAccount = new Map<string, (typeof recentLogs)[number]>()
+    for (const log of recentLogs) {
+      if (log.adAccountId && !latestByAccount.has(log.adAccountId)) latestByAccount.set(log.adAccountId, log)
+    }
+    const readyAccounts = staleAccounts.filter(acc => {
+      const log = latestByAccount.get(acc.id)
+      return !log || metaCooldownRemaining(log.startedAt, log.errorMessage) === 0
+    })
+    if (!readyAccounts.length) return { triggered: false, reason: 'rate_limited' }
 
-    const results = await Promise.allSettled(staleAccounts.map((acc) => syncAdAccount(workspaceId, acc.id)))
-    const failed = results.filter((result) => result.status === 'rejected' || !result.value.success)
-    if (failed.length) {
-      console.error(`[Auto-Sync Meta Ads] Falha em ${failed.length} de ${staleAccounts.length} conta(s)`)
-      return { triggered: false, reason: 'sync_failed', accountIds: accountIdsToSync }
+    const attempted: string[] = []
+    let failed = 0
+    for (const acc of readyAccounts) {
+      const result = await syncAdAccount(workspaceId, acc.id)
+      attempted.push(acc.id)
+      if (result.rateLimited) return { triggered: false, reason: 'rate_limited', accountIds: attempted }
+      if (!result.success) failed++
+    }
+    if (failed) {
+      console.error(`[Auto-Sync Meta Ads] Falha em ${failed} de ${attempted.length} conta(s)`)
+      return { triggered: false, reason: 'sync_failed', accountIds: attempted }
     }
     return {
       triggered: true,
-      accountIds: accountIdsToSync,
+      accountIds: attempted,
     }
   } catch (error) {
     console.error('[Auto-Sync Meta Ads] Falha ao verificar contas para auto-sync:', error)
