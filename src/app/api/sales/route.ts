@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
 import { purgeTestSales } from '@/lib/integrations/normalizer'
+import { resolveAnalyticsInterval } from '@/lib/meta/insight-helpers'
 
 export async function GET(req: Request) {
   try {
@@ -23,6 +24,7 @@ export async function GET(req: Request) {
     const status = searchParams.get('status')
     const platform = searchParams.get('platform')
     const search = searchParams.get('search')
+    const preset = searchParams.get('preset')
     const from = searchParams.get('from')
     const to = searchParams.get('to')
     const page = parseInt(searchParams.get('page') || '1', 10)
@@ -49,20 +51,28 @@ export async function GET(req: Request) {
       ]
     }
 
-    if (from || to) {
-      where.orderedAt = {}
-      if (from) where.orderedAt.gte = new Date(from)
-      if (to) where.orderedAt.lte = new Date(to)
-    }
-
     const statsWhere: any = { workspaceId }
     if (platform && platform !== 'all') {
       statsWhere.platform = platform.toLowerCase()
     }
-    if (from || to) {
-      statsWhere.orderedAt = {}
-      if (from) statsWhere.orderedAt.gte = new Date(from)
-      if (to) statsWhere.orderedAt.lte = new Date(to)
+
+    const isAllTime = preset && (preset.toLowerCase() === 'all' || preset.toLowerCase() === 'todas' || preset.toLowerCase().includes('todo'))
+    if (!isAllTime && (preset || from || to)) {
+      const workspace = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { timezone: true }
+      })
+      const tz = workspace?.timezone || 'America/Sao_Paulo'
+      const interval = resolveAnalyticsInterval(preset || null, tz, from, to)
+
+      where.orderedAt = {
+        gte: interval.saleFrom,
+        lt: interval.saleTo
+      }
+      statsWhere.orderedAt = {
+        gte: interval.saleFrom,
+        lt: interval.saleTo
+      }
     }
 
     const [sales, totalCount, allStatusSales] = await Promise.all([

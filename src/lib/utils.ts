@@ -73,6 +73,11 @@ export function getDateRange(preset: string): DateRange {
     };
   }
 
+  // 10. Todo o período
+  if (normalized.includes("todo") || normalized === "all" || normalized === "todas") {
+    return { from: new Date("2020-01-01T00:00:00Z"), to: endOfDay(now), label: "Todo o período" };
+  }
+
   // Fallback padrão: Últimos 30 dias
   return { from: startOfDay(subDays(now, 29)), to: endOfDay(now), label: "Últimos 30 dias" };
 }

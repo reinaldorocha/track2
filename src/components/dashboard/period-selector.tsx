@@ -20,6 +20,7 @@ const PRESETS = [
   'Últimos 90 dias',
   'Este mês',
   'Mês anterior',
+  'Todo o período',
   'Personalizado'
 ]
 

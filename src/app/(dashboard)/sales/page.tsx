@@ -24,11 +24,12 @@ import {
   Upload,
   FileSpreadsheet,
 } from "lucide-react";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDateTime, getDateRange } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
 import { playNotificationSound, SoundType } from "@/lib/sound";
 import { HourlySalesBreakdown } from "@/components/sales/hourly-sales-breakdown";
 import { ImportSalesModal } from "@/components/sales/import-sales-modal";
+import { PeriodSelector } from "@/components/dashboard/period-selector";
 
 type SaleItem = {
   id: string;
@@ -95,16 +96,33 @@ export default function SalesPage() {
   const [saleToDelete, setSaleToDelete] = useState<SaleItem | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
 
+  // Filtro por dia (padrão "hoje")
+  const [period, setPeriod] = useState({
+    preset: "Hoje",
+    ...getDateRange("today"),
+  });
+
   // Estado para importação de CSV (Getfy)
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const { data, isLoading } = useQuery<SalesResponse>({
-    queryKey: ["sales-list", statusFilter, platformFilter, search],
+    queryKey: [
+      "sales-list",
+      statusFilter,
+      platformFilter,
+      search,
+      period.preset,
+      period.from?.toISOString(),
+      period.to?.toISOString()
+    ],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.append("status", statusFilter);
       if (platformFilter !== "all") params.append("platform", platformFilter);
       if (search.trim()) params.append("search", search.trim());
+      if (period.preset) params.append("preset", period.preset);
+      if (period.from) params.append("from", period.from.toISOString());
+      if (period.to) params.append("to", period.to.toISOString());
       const res = await fetch(`/api/sales?${params.toString()}`);
       if (!res.ok) throw new Error("Erro ao buscar vendas");
       return res.json();
@@ -268,17 +286,30 @@ export default function SalesPage() {
       ) : (
         <>
           {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>Faturamento Aprovado</span>
+            <span>Faturamento Bruto</span>
             <DollarSign className="w-4 h-4 text-emerald-500" />
           </div>
-          <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+          <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">
             {formatCurrency(stats.totalGross)}
           </div>
           <div className="text-[11px] text-gray-400 mt-1">
             {stats.countApproved} pedidos confirmados
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>Faturamento Líquido</span>
+            <TrendingUp className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+            {formatCurrency(stats.totalNet)}
+          </div>
+          <div className="text-[11px] text-gray-400 mt-1">
+            após taxas de checkout
           </div>
         </div>
 
@@ -321,7 +352,7 @@ export default function SalesPage() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm col-span-2 lg:col-span-1">
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <div className="flex items-center justify-between text-xs text-gray-500">
             <span>Taxa de Aprovação</span>
             <Percent className="w-4 h-4 text-purple-500" />
@@ -391,7 +422,11 @@ export default function SalesPage() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <PeriodSelector
+              value={period.preset}
+              onChange={(preset, from, to) => setPeriod({ preset, from, to, label: preset })}
+            />
             <select
               value={platformFilter}
               onChange={(e) => setPlatformFilter(e.target.value)}
@@ -466,6 +501,7 @@ export default function SalesPage() {
                 <th className="p-3.5">Plataforma</th>
                 <th className="p-3.5">ID Pedido / Transação</th>
                 <th className="p-3.5">Valor Bruto</th>
+                <th className="p-3.5">Valor Líquido</th>
                 <th className="p-3.5">UTM Campanha</th>
                 <th className="p-3.5">Atribuição</th>
                 <th className="p-3.5 text-right">Ação</th>
@@ -474,7 +510,7 @@ export default function SalesPage() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-gray-400">
+                  <td colSpan={10} className="p-8 text-center text-gray-400">
                     <div className="animate-pulse space-y-2">
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/3 mx-auto" />
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/2 mx-auto" />
@@ -483,7 +519,7 @@ export default function SalesPage() {
                 </tr>
               ) : !data?.sales || data.sales.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-gray-500">
+                  <td colSpan={10} className="p-12 text-center text-gray-500">
                     <ShoppingBag className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
                     <p className="font-semibold text-gray-700 dark:text-gray-300">Nenhuma venda encontrada</p>
                     <p className="text-xs text-gray-400 mt-1">
@@ -522,8 +558,11 @@ export default function SalesPage() {
                       <td className="p-3.5 font-mono text-xs text-gray-900 dark:text-white font-medium">
                         {sale.externalId}
                       </td>
-                      <td className="p-3.5 font-bold text-gray-900 dark:text-white">
+                      <td className="p-3.5 font-semibold text-gray-900 dark:text-white">
                         {formatCurrency(sale.grossAmount, sale.currency)}
+                      </td>
+                      <td className="p-3.5 font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(sale.netAmount, sale.currency)}
                       </td>
                       <td className="p-3.5 text-gray-600 dark:text-gray-400">
                         {sale.utmCampaign ? (

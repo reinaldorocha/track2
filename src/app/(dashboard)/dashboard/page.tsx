@@ -75,8 +75,8 @@ export const DEFAULT_KPI_ORDER: string[] = [
 
 export default function DashboardPage() {
   const [period, setPeriod] = useState({
-    preset: 'Últimos 30 dias',
-    ...getDateRange('last30days'),
+    preset: 'Hoje',
+    ...getDateRange('today'),
   })
 
   // Filtros Globais do Topo

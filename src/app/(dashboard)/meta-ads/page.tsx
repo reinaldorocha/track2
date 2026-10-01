@@ -41,8 +41,8 @@ function MetaAdsContent() {
 
   const [activeTab, setActiveTab] = useState<"Contas" | "Campanhas" | "Conjuntos" | "Anúncios">("Contas");
   const [period, setPeriod] = useState({
-    preset: "Últimos 30 dias",
-    ...getDateRange("last30days"),
+    preset: "Hoje",
+    ...getDateRange("today"),
   });
 
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
