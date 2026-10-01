@@ -29,6 +29,7 @@ export interface InternalSale {
   orderedAt: Date
   approvedAt?: Date
   refundedAt?: Date
+  skipCapi?: boolean
   productInfo?: {
     id?: string | number
     name?: string
@@ -422,7 +423,10 @@ export function normalizeSaleStatus(
     s === 'orders/cancelled' ||
     s === 'cancelled' ||
     s === 'canceled' ||
+    s === 'cancelado' ||
     s === 'recusado' ||
+    s === 'rejected' ||
+    s.includes('reject') ||
     s === 'falhado' ||
     s === 'failed' ||
     s === 'expired' ||
@@ -461,11 +465,11 @@ export function normalizeSalePaymentMethod(payload: Record<string, unknown>, _pr
     payload.gateway ||
     (payload.payment_gateway_names as string[])?.[0] ||
     ''
-  ).toLowerCase()
+  ).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 
   if (rawType.includes('pix')) return 'pix'
   if (rawType.includes('boleto') || rawType.includes('billet') || rawType.includes('bank_slip')) return 'boleto'
-  if (rawType.includes('card') || rawType.includes('cartao') || rawType.includes('credito') || rawType.includes('debito')) return 'card'
+  if (rawType.includes('card') || rawType.includes('cartao') || rawType.includes('cart') || rawType.includes('credito') || rawType.includes('debito')) return 'card'
 
   return rawType || 'card'
 }
@@ -690,7 +694,7 @@ export async function upsertSale(sale: InternalSale) {
 
   // Disparo automático para Meta Conversions API (CAPI) em vendas aprovadas
   let capiResult: { sent: boolean; success?: boolean; reason?: string; error?: string; pixelId?: string; result?: unknown; skipped?: boolean } | undefined = undefined
-  if (result.status === 'approved') {
+  if (result.status === 'approved' && !sale.skipCapi) {
     try {
       capiResult = await dispatchPurchaseToCapi({
         workspaceId: result.workspaceId,

@@ -21,11 +21,14 @@ import {
   Sparkles,
   Trash2,
   AlertTriangle,
+  Upload,
+  FileSpreadsheet,
 } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
 import { playNotificationSound, SoundType } from "@/lib/sound";
 import { HourlySalesBreakdown } from "@/components/sales/hourly-sales-breakdown";
+import { ImportSalesModal } from "@/components/sales/import-sales-modal";
 
 type SaleItem = {
   id: string;
@@ -91,6 +94,9 @@ export default function SalesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [saleToDelete, setSaleToDelete] = useState<SaleItem | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+
+  // Estado para importação de CSV (Getfy)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const { data, isLoading } = useQuery<SalesResponse>({
     queryKey: ["sales-list", statusFilter, platformFilter, search],
@@ -220,28 +226,40 @@ export default function SalesPage() {
           </p>
         </div>
 
-        {/* Alternador de Visualização: Feed vs Vendas por Horário */}
-        <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1.5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        {/* Ações do Header */}
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={() => setViewMode("feed")}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
-              viewMode === "feed"
-                ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow"
-                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-            }`}
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+            title="Importar vendas da Getfy via arquivo CSV"
           >
-            📋 Feed de Pedidos
+            <Upload className="w-3.5 h-3.5" />
+            <span>Importar CSV (Getfy)</span>
           </button>
-          <button
-            onClick={() => setViewMode("hourly")}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
-              viewMode === "hourly"
-                ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow"
-                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-            }`}
-          >
-            ⏰ Vendas por Horário (24h)
-          </button>
+
+          {/* Alternador de Visualização: Feed vs Vendas por Horário */}
+          <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1.5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+            <button
+              onClick={() => setViewMode("feed")}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
+                viewMode === "feed"
+                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              📋 Feed de Pedidos
+            </button>
+            <button
+              onClick={() => setViewMode("hourly")}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
+                viewMode === "hourly"
+                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              ⏰ Vendas por Horário (24h)
+            </button>
+          </div>
         </div>
       </div>
 
@@ -380,6 +398,8 @@ export default function SalesPage() {
               className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
             >
               <option value="all">Todas as Plataformas</option>
+              <option value="getfy">Getfy</option>
+              <option value="kiwify">Kiwify</option>
               <option value="hotmart">Hotmart</option>
               <option value="shopify">Shopify</option>
               <option value="yampi">Yampi</option>
@@ -778,6 +798,12 @@ export default function SalesPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Importação de Vendas via CSV (Getfy) */}
+      <ImportSalesModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+      />
     </div>
   );
 }

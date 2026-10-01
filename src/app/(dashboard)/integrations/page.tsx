@@ -27,6 +27,7 @@ import {
   Sliders,
   AlertCircle,
   MessageSquare,
+  FileSpreadsheet,
 } from "lucide-react";
 import Link from "next/link";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -783,7 +784,13 @@ export default function IntegrationsHubPage() {
                 </div>
               </div>
               <div className="pt-2 flex justify-between items-center text-xs">
-                <span className="text-slate-400 text-[11px]">Token já embutido na URL (?token=...)</span>
+                <Link
+                  href="/sales"
+                  className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline flex items-center gap-1.5"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Importar CSV de Vendas</span>
+                </Link>
                 <button
                   onClick={() => runIntegrationTest("getfy")}
                   className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
