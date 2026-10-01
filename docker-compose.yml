@@ -1,5 +1,6 @@
 services:
   utm-track:
+    image: utm-track:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -14,6 +15,18 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+
+  meta-cron:
+    image: utm-track:local
+    container_name: utm-track-meta-cron
+    restart: always
+    depends_on:
+      - utm-track
+    networks:
+      - app_network
+    env_file:
+      - .env.production
+    command: ["node", "scripts/meta-cron.js"]
 
 networks:
   app_network:

@@ -10,6 +10,7 @@ export interface AutoSyncStatus {
   totalAccounts: number
   activeAccounts: number
   activeAccountNames: string[]
+  lastError: string | null
 }
 
 /**
@@ -50,6 +51,7 @@ export async function getAutoSyncStatus(
   })
 
   const isSyncing = Boolean(runningLog)
+  const latestLog = await prisma.syncLog.findFirst({ where: { workspaceId, type: 'meta_ads', status: { in: ['success', 'partial', 'failed'] } }, orderBy: { startedAt: 'desc' }, select: { status: true, errorMessage: true } })
 
   let nextSyncInMinutes = 0
   if (latestSync) {
@@ -58,7 +60,7 @@ export async function getAutoSyncStatus(
   }
 
   return {
-    enabled: activeCount > 0,
+    enabled: activeCount > 0 && Boolean(process.env.CRON_SECRET),
     intervalMinutes: maxAgeMinutes,
     lastSyncAt: latestSync ? latestSync.toISOString() : null,
     nextSyncInMinutes,
@@ -66,6 +68,7 @@ export async function getAutoSyncStatus(
     totalAccounts,
     activeAccounts: activeCount,
     activeAccountNames: activeAccounts.map((a) => a.name),
+    lastError: latestLog?.status === 'partial' || latestLog?.status === 'failed' ? latestLog.errorMessage : null,
   }
 }
 

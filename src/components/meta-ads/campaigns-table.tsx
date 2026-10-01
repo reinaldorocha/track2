@@ -12,7 +12,6 @@ import {
   ArrowUpDown,
   Download,
   Search,
-  Filter,
   Columns,
   CheckSquare,
   Square,
@@ -27,8 +26,6 @@ import {
   Edit3,
   Check,
   X,
-  Plus,
-  Minus,
 } from "lucide-react";
 
 export type MetaTableLevel = "campaign" | "adset" | "ad";
@@ -50,23 +47,26 @@ export interface MetaTableItem {
   previewUrl?: string | null;
   status: string;
   budget?: number | null;
-  spend: number;
+  spend: number | null;
   sales: number;
+  metaPurchases?: number | null;
+  metaAttribution?: string | null;
+  currency?: string;
   realSalesCount?: number;
   cpa: number | null;
-  revenue: number;
-  netRevenue?: number;
-  profit: number;
+  revenue: number | null;
+  netRevenue: number | null;
+  profit: number | null;
   roas: number | null;
   grossRoas?: number | null;
   roi: number | null;
-  impressions: number;
+  impressions: number | null;
   margin: number | null;
   cpm: number | null;
-  clicks: number;
+  clicks: number | null;
   cpc: number | null;
   ctr: number | null;
-  ic: number;
+  ic: number | null;
   cpi: number | null;
   recommendation?: MetaRecommendation;
 }
@@ -76,16 +76,15 @@ interface CampaignsTableProps {
   adAccountId?: string;
   periodFrom?: string;
   periodTo?: string;
+  periodPreset?: string;
+  campaignIds?: string[];
+  adSetIds?: string[];
+  selectedIds?: string[];
+  onSelectedIdsChange?: (ids: string[]) => void;
 }
 
-export function getRecommendationBadge(rec?: MetaRecommendation, item?: { spend?: number }) {
-  if (!rec && item?.spend && item.spend > 0) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300 border border-sky-300/60 dark:border-sky-700/60 whitespace-nowrap">
-        <span>🧪</span> Em Teste
-      </span>
-    );
-  }
+export function getRecommendationBadge(rec?: MetaRecommendation) {
+  if (!rec) return <span title="Sem avaliação baseada em dados suficientes">—</span>;
 
   switch (rec) {
     case "scale":
@@ -120,13 +119,6 @@ export function getRecommendationBadge(rec?: MetaRecommendation, item?: { spend?
       );
     case "inactive":
     default:
-      if (item?.spend && item.spend > 0) {
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300 border border-sky-300/60 dark:border-sky-700/60 whitespace-nowrap">
-            <span>🧪</span> Em Teste
-          </span>
-        );
-      }
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-normal bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 whitespace-nowrap">
           <span>⏸️</span> Sem Gasto
@@ -140,6 +132,11 @@ export function CampaignsTable({
   adAccountId = "all",
   periodFrom,
   periodTo,
+  periodPreset,
+  campaignIds = [],
+  adSetIds = [],
+  selectedIds,
+  onSelectedIdsChange,
 }: CampaignsTableProps) {
   const queryClient = useQueryClient();
 
@@ -148,7 +145,13 @@ export function CampaignsTable({
   const [recommendationFilter, setRecommendationFilter] = useState<string>("all");
   const [sortField, setSortField] = useState<keyof MetaTableItem>(level === "ad" ? "profit" : "spend");
   const [sortAsc, setSortAsc] = useState(false);
-  const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
+  const [localSelectedIds, setLocalSelectedIds] = useState<string[]>([]);
+  const selectedRowIds = selectedIds ?? localSelectedIds;
+  const setSelectedRowIds = (value: string[] | ((ids: string[]) => string[])) => {
+    const next = typeof value === 'function' ? value(selectedRowIds) : value;
+    if (onSelectedIdsChange) onSelectedIdsChange(next);
+    else setLocalSelectedIds(next);
+  };
   const [isColumnPickerOpen, setIsColumnPickerOpen] = useState(false);
 
   // Modais de Edição
@@ -159,11 +162,12 @@ export function CampaignsTable({
   // Colunas configuráveis
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     status: true,
-    recommendation: true,
+    recommendation: false,
     name: true,
     budget: level !== "ad",
     spend: true,
     sales: true,
+    metaPurchases: true,
     cpa: true,
     revenue: true,
     netRevenue: true,
@@ -181,8 +185,8 @@ export function CampaignsTable({
     actions: true,
   });
 
-  const { data, isLoading, refetch, isFetching } = useQuery<{ data: MetaTableItem[] }>({
-    queryKey: ["meta-insights-table", level, adAccountId, statusFilter, searchTerm, periodFrom, periodTo],
+  const { data, isLoading, refetch, isFetching } = useQuery<{ data: MetaTableItem[]; coverage: Array<{ accountId: string; from: string; to: string; complete: boolean; lastSyncAt: string | null; error: string | null }>; attribution: { approved: number; attributed: number; unassigned: number }; metaAttribution: string }>({
+    queryKey: ["meta-insights-table", level, adAccountId, statusFilter, searchTerm, periodFrom, periodTo, periodPreset, campaignIds, adSetIds],
     queryFn: async () => {
       const params = new URLSearchParams({
         level,
@@ -191,7 +195,10 @@ export function CampaignsTable({
         ...(searchTerm ? { search: searchTerm } : {}),
         ...(periodFrom ? { from: periodFrom } : {}),
         ...(periodTo ? { to: periodTo } : {}),
+        ...(periodPreset ? { preset: periodPreset } : {}),
       });
+      campaignIds.forEach(id => params.append('campaignId', id));
+      adSetIds.forEach(id => params.append('adSetId', id));
       const res = await fetch(`/api/meta/insights?${params.toString()}`);
       if (!res.ok) throw new Error("Erro ao buscar dados da tabela");
       return res.json();
@@ -199,6 +206,16 @@ export function CampaignsTable({
   });
 
   const items = data?.data || [];
+  const money = (value: number | null | undefined, currency = 'BRL') => value == null ? '—' : formatCurrency(value, currency);
+  const number = (value: number | null | undefined) => value == null ? '—' : formatNumber(value);
+  const percent = (value: number | null | undefined) => value == null ? '—' : formatPercent(value);
+  const attributionLabel = (value: string | null | undefined) => {
+    if (!value) return 'Janela da Meta não informada ou variável entre conjuntos';
+    try {
+      const specs = JSON.parse(value) as Array<{ event_type?: string; window_days?: number }>;
+      return specs.map(spec => `${spec.event_type || 'Evento'}: ${spec.window_days ?? '—'} dia(s)`).join(', ');
+    } catch { return 'Janela da Meta indisponível'; }
+  };
 
   // Mutação para Atualizações (Status, Orçamento, Nome e Ações em Massa)
   const manageMutation = useMutation({
@@ -273,7 +290,7 @@ export function CampaignsTable({
   // Métricas agregadas para os KPI Cards
   const topCreative =
     items.length > 0
-      ? [...items].sort((a, b) => b.profit - a.profit)[0]
+      ? [...items].sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity))[0]
       : null;
   const scaleCount = items.filter((i) => i.recommendation === "scale").length;
   const profitableCount = items.filter((i) => i.recommendation === "profitable").length;
@@ -282,9 +299,9 @@ export function CampaignsTable({
   const learningCount = items.filter((i) => i.recommendation === "learning").length;
 
   const totalNetProfit = items.reduce((acc, i) => acc + (i.profit || 0), 0);
-  const totalNetRevenue = items.reduce((acc, i) => acc + (i.netRevenue ?? (i.revenue * 0.9)), 0);
+  const totalNetRevenue = items.every(i => i.netRevenue != null) ? items.reduce((acc, i) => acc + (i.netRevenue ?? 0), 0) : null;
   const totalSpend = items.reduce((acc, i) => acc + (i.spend || 0), 0);
-  const overallRoas = totalSpend > 0 ? totalNetRevenue / totalSpend : null;
+  const overallRoas = totalSpend > 0 && totalNetRevenue != null && items.every(i => i.spend != null) ? totalNetRevenue / totalSpend : null;
 
   // Filtragem por Recomendação
   const filteredItems = items.filter((item) => {
@@ -368,7 +385,7 @@ export function CampaignsTable({
       acc.spend += curr.spend || 0;
       acc.sales += curr.sales || 0;
       acc.revenue += curr.revenue || 0;
-      acc.netRevenue += curr.netRevenue ?? (curr.revenue * 0.9);
+      acc.netRevenue += curr.netRevenue ?? 0;
       acc.profit += curr.profit || 0;
       acc.impressions += curr.impressions || 0;
       acc.clicks += curr.clicks || 0;
@@ -378,38 +395,44 @@ export function CampaignsTable({
     { spend: 0, sales: 0, revenue: 0, netRevenue: 0, profit: 0, impressions: 0, clicks: 0, ic: 0 }
   );
 
-  const totalCpa = totals.sales > 0 ? totals.spend / totals.sales : null;
-  const totalRoas = totals.spend > 0 ? totals.netRevenue / totals.spend : null;
-  const totalGrossRoas = totals.spend > 0 ? totals.revenue / totals.spend : null;
+  const oneCurrency = new Set(sortedItems.map(i => i.currency || 'BRL')).size <= 1;
+  const monetaryFields: Array<keyof MetaTableItem> = ['spend', 'revenue', 'netRevenue', 'profit', 'cpa', 'cpm', 'cpc', 'cpi', 'roas', 'grossRoas', 'budget'];
+  const complete = (field: keyof MetaTableItem) => (!monetaryFields.includes(field) || oneCurrency) && sortedItems.every(i => i[field] != null);
+  const totalCurrency = sortedItems[0]?.currency || 'BRL';
+
+  const totalCpa = complete('spend') && totals.sales > 0 ? totals.spend / totals.sales : null;
+  const totalRoas = complete('spend') && complete('netRevenue') && totals.spend > 0 ? totals.netRevenue / totals.spend : null;
   const totalRoi = totals.spend > 0 ? (totals.profit / totals.spend) * 100 : null;
   const totalMargin = totals.revenue > 0 ? (totals.profit / totals.revenue) * 100 : null;
-  const totalCpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : null;
-  const totalCpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
+  const totalCpm = complete('spend') && complete('impressions') && totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : null;
+  const totalCpc = complete('spend') && complete('clicks') && totals.clicks > 0 ? totals.spend / totals.clicks : null;
   const totalCtr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null;
-  const totalCpi = totals.ic > 0 ? totals.spend / totals.ic : null;
+  const totalCpi = complete('spend') && complete('ic') && totals.ic > 0 ? totals.spend / totals.ic : null;
 
   const exportCSV = () => {
     const headers = [
       "Nome",
       "Recomendação",
       "Status",
-      "Gasto (R$)",
+      "Moeda",
+      "Gasto (moeda da conta)",
       "Vendas",
-      "CPA (R$)",
-      "Faturamento (R$)",
-      "Receita Líquida (R$)",
-      "Lucro Líquido Real (R$)",
+      "Compras Meta",
+      "CPA (moeda da conta)",
+      "Faturamento (moeda da conta)",
+      "Receita Líquida (moeda da conta)",
+      "Lucro Líquido Real (moeda da conta)",
       "ROAS Líquido",
       "ROAS Bruto",
       "ROI (%)",
       "Impressões",
       "Margem (%)",
-      "CPM (R$)",
+      "CPM (moeda da conta)",
       "Cliques",
-      "CPC (R$)",
+      "CPC (moeda da conta)",
       "CTR (%)",
       "ICs",
-      "CPI (R$)",
+      "CPI (moeda da conta)",
     ];
     const lines = [headers.join(";")];
     for (const item of sortedItems) {
@@ -418,22 +441,24 @@ export function CampaignsTable({
           `"${item.name.replace(/"/g, '""')}"`,
           item.recommendation || "",
           item.status,
-          item.spend.toFixed(2),
+          item.currency || "",
+          item.spend?.toFixed(2) ?? "",
           item.sales,
+          item.metaPurchases ?? "",
           item.cpa !== null ? item.cpa.toFixed(2) : "",
-          item.revenue.toFixed(2),
-          (item.netRevenue ?? (item.revenue * 0.9)).toFixed(2),
-          item.profit.toFixed(2),
+          item.revenue?.toFixed(2) ?? "",
+          item.netRevenue?.toFixed(2) ?? "",
+          item.profit?.toFixed(2) ?? "",
           item.roas !== null ? item.roas.toFixed(2) : "",
           item.grossRoas !== null && item.grossRoas !== undefined ? item.grossRoas.toFixed(2) : "",
           item.roi !== null ? item.roi.toFixed(2) : "",
-          item.impressions,
+          item.impressions ?? "",
           item.margin !== null ? item.margin.toFixed(2) : "",
           item.cpm !== null ? item.cpm.toFixed(2) : "",
-          item.clicks,
+          item.clicks ?? "",
           item.cpc !== null ? item.cpc.toFixed(2) : "",
           item.ctr !== null ? item.ctr.toFixed(2) : "",
-          item.ic,
+          item.ic ?? "",
           item.cpi !== null ? item.cpi.toFixed(2) : "",
         ].join(";")
       );
@@ -455,6 +480,15 @@ export function CampaignsTable({
 
   return (
     <div className="space-y-4">
+      {data?.coverage?.some(c => !c.complete) && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          O período selecionado ainda não tem importação completa. Métricas da Meta e indicadores dependentes aparecem como —.{' '}
+          {data.coverage.filter(c => !c.complete).map(c => c.error || `Conta ${c.accountId}: ${c.from} a ${c.to} sem cobertura confirmada`).join('; ')}
+        </div>
+      )}
+      {data?.coverage?.every(c => c.complete) && data.coverage.length > 0 && (
+        <div className="text-xs text-slate-500">Insights importados para {data.coverage.map(c => `${c.from} a ${c.to}`).join(', ')}. Compras Meta seguem a configuração de atribuição do conjunto.</div>
+      )}
       {/* Toast Feedback */}
       {actionFeedback && (
         <div
@@ -475,7 +509,7 @@ export function CampaignsTable({
       )}
 
       {/* KPI Cards de Criativos Mais Lucrativos (quando level === 'ad') */}
-      {level === "ad" && items.length > 0 && (
+      {level === "ad" && items.length > 0 && items.every(i => i.profit != null) && oneCurrency && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in">
           {/* Top Criativo */}
           <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-4 shadow-sm flex flex-col justify-between hover:border-amber-400/80 transition-all">
@@ -492,7 +526,7 @@ export function CampaignsTable({
               </p>
               <div className="flex items-baseline gap-2 mt-1">
                 <span className="text-lg font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                  {topCreative ? formatCurrency(topCreative.profit) : "R$ 0,00"}
+                  {topCreative ? money(topCreative.profit, topCreative.currency) : "—"}
                 </span>
                 <span className="text-xs font-mono font-semibold text-purple-600 dark:text-purple-400">
                   ROAS Líq: {topCreative ? formatMetric(topCreative.roas, "ratio") : "0x"}
@@ -501,7 +535,7 @@ export function CampaignsTable({
             </div>
             <div className="text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-[#142C52]/60 flex items-center justify-between">
               <span>Vendas: <strong className="text-slate-700 dark:text-slate-200">{topCreative?.sales || 0}</strong></span>
-              <span>Gasto: <strong className="text-slate-700 dark:text-slate-200">{formatCurrency(topCreative?.spend || 0)}</strong></span>
+              <span>Gasto: <strong className="text-slate-700 dark:text-slate-200">{money(topCreative?.spend, topCreative?.currency)}</strong></span>
             </div>
           </div>
 
@@ -520,14 +554,14 @@ export function CampaignsTable({
                   totalNetProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
                 }`}
               >
-                {formatCurrency(totalNetProfit)}
+                {items.every(i => i.profit != null) && oneCurrency ? money(totalNetProfit, totalCurrency) : '—'}
               </span>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                Líquido Real: <span className="font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(totalNetRevenue)}</span>
+                Líquido Real: <span className="font-semibold text-slate-700 dark:text-slate-300">{oneCurrency ? money(totalNetRevenue, totalCurrency) : '—'}</span>
               </p>
             </div>
             <div className="text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-[#142C52]/60 flex items-center justify-between font-mono">
-              <span>Gasto Meta: {formatCurrency(totalSpend)}</span>
+              <span>Gasto Meta: {complete('spend') ? money(totalSpend, totalCurrency) : '—'}</span>
               <span className="text-purple-600 dark:text-purple-400 font-bold">ROAS: {formatMetric(overallRoas, "ratio")}</span>
             </div>
           </div>
@@ -838,6 +872,7 @@ export function CampaignsTable({
                   </th>
                 )}
 
+                {visibleColumns.metaPurchases && <th className="p-3 text-right" title="Compras segundo a atribuição configurada nos conjuntos da Meta">Compras Meta</th>}
                 {visibleColumns.cpa && (
                   <th onClick={() => handleSort("cpa")} className="p-3 text-right cursor-pointer hover:text-blue-600">
                     <div className="flex items-center justify-end gap-1">
@@ -1044,7 +1079,7 @@ export function CampaignsTable({
 
                       {visibleColumns.recommendation && (
                         <td className="p-3">
-                          {getRecommendationBadge(item.recommendation, item)}
+                          {getRecommendationBadge(item.recommendation)}
                         </td>
                       )}
 
@@ -1093,7 +1128,7 @@ export function CampaignsTable({
 
                       {visibleColumns.spend && (
                         <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">
-                          {formatCurrency(item.spend)}
+                          {money(item.spend, item.currency)}
                         </td>
                       )}
 
@@ -1108,33 +1143,34 @@ export function CampaignsTable({
                         </td>
                       )}
 
+                      {visibleColumns.metaPurchases && <td className="p-3 text-right font-mono" title={attributionLabel(item.metaAttribution)}>{number(item.metaPurchases)}</td>}
                       {visibleColumns.cpa && (
                         <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-200">
-                          {item.cpa ? formatCurrency(item.cpa) : "—"}
+                          {money(item.cpa, item.currency)}
                         </td>
                       )}
 
                       {visibleColumns.revenue && (
                         <td className="p-3 text-right font-mono font-bold text-blue-600 dark:text-blue-400">
-                          {formatCurrency(item.revenue)}
+                          {money(item.revenue, item.currency)}
                         </td>
                       )}
 
                       {visibleColumns.netRevenue && (
                         <td className="p-3 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                          {formatCurrency(item.netRevenue ?? (item.revenue * 0.9))}
+                          {money(item.netRevenue, item.currency)}
                         </td>
                       )}
 
                       {visibleColumns.profit && (
                         <td
                           className={`p-3 text-right font-mono font-bold ${
-                            item.profit >= 0
+                            item.profit != null && item.profit >= 0
                               ? "text-emerald-600 dark:text-emerald-400"
                               : "text-rose-600 dark:text-rose-400"
                           }`}
                         >
-                          {formatCurrency(item.profit)}
+                          {money(item.profit, item.currency)}
                         </td>
                       )}
 
@@ -1157,55 +1193,55 @@ export function CampaignsTable({
                             (item.roi || 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600"
                           }`}
                         >
-                          {formatPercent(item.roi || 0)}
+                          {percent(item.roi)}
                         </td>
                       )}
 
                       {visibleColumns.impressions && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {formatNumber(item.impressions)}
+                          {number(item.impressions)}
                         </td>
                       )}
 
                       {visibleColumns.margin && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {formatPercent(item.margin || 0)}
+                          {percent(item.margin)}
                         </td>
                       )}
 
                       {visibleColumns.cpm && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {item.cpm ? formatCurrency(item.cpm) : "—"}
+                          {money(item.cpm, item.currency)}
                         </td>
                       )}
 
                       {visibleColumns.clicks && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {formatNumber(item.clicks)}
+                          {number(item.clicks)}
                         </td>
                       )}
 
                       {visibleColumns.cpc && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {item.cpc ? formatCurrency(item.cpc) : "—"}
+                          {money(item.cpc, item.currency)}
                         </td>
                       )}
 
                       {visibleColumns.ctr && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {formatPercent(item.ctr || 0)}
+                          {percent(item.ctr)}
                         </td>
                       )}
 
                       {visibleColumns.ic && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {formatNumber(item.ic)}
+                          {number(item.ic)}
                         </td>
                       )}
 
                       {visibleColumns.cpi && (
                         <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          {item.cpi ? formatCurrency(item.cpi) : "—"}
+                          {money(item.cpi, item.currency)}
                         </td>
                       )}
 
@@ -1246,34 +1282,35 @@ export function CampaignsTable({
                   {visibleColumns.recommendation && <td className="p-3">—</td>}
                   {visibleColumns.name && <td className="p-3">Total ({sortedItems.length})</td>}
                   {visibleColumns.budget && <td className="p-3 text-right font-mono">—</td>}
-                  {visibleColumns.spend && <td className="p-3 text-right font-mono">{formatCurrency(totals.spend)}</td>}
+                  {visibleColumns.spend && <td className="p-3 text-right font-mono">{complete('spend') ? money(totals.spend, totalCurrency) : '—'}</td>}
                   {visibleColumns.sales && <td className="p-3 text-right font-mono">{formatNumber(totals.sales)}</td>}
-                  {visibleColumns.cpa && <td className="p-3 text-right font-mono">{totalCpa ? formatCurrency(totalCpa) : "—"}</td>}
-                  {visibleColumns.revenue && <td className="p-3 text-right font-mono text-blue-600 dark:text-blue-400">{formatCurrency(totals.revenue)}</td>}
-                  {visibleColumns.netRevenue && <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400">{formatCurrency(totals.netRevenue)}</td>}
+                  {visibleColumns.metaPurchases && <td className="p-3 text-right font-mono">{complete('metaPurchases') ? number(sortedItems.reduce((n, i) => n + (i.metaPurchases ?? 0), 0)) : '—'}</td>}
+                  {visibleColumns.cpa && <td className="p-3 text-right font-mono">{money(totalCpa, totalCurrency)}</td>}
+                  {visibleColumns.revenue && <td className="p-3 text-right font-mono text-blue-600 dark:text-blue-400">{complete('revenue') ? money(totals.revenue, totalCurrency) : '—'}</td>}
+                  {visibleColumns.netRevenue && <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400">{complete('netRevenue') ? money(totals.netRevenue, totalCurrency) : '—'}</td>}
                   {visibleColumns.profit && (
                     <td
                       className={`p-3 text-right font-mono ${
                         totals.profit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600"
                       }`}
                     >
-                      {formatCurrency(totals.profit)}
+                      {complete('profit') ? money(totals.profit, totalCurrency) : '—'}
                     </td>
                   )}
                   {visibleColumns.roas && (
                     <td className="p-3 text-right font-mono text-purple-600 dark:text-purple-400">
-                      {formatMetric(totalRoas, "ratio")}
+                        {totalRoas == null ? '—' : formatMetric(totalRoas, "ratio")}
                     </td>
                   )}
-                  {visibleColumns.roi && <td className="p-3 text-right font-mono">{formatPercent(totalRoi || 0)}</td>}
-                  {visibleColumns.impressions && <td className="p-3 text-right font-mono">{formatNumber(totals.impressions)}</td>}
-                  {visibleColumns.margin && <td className="p-3 text-right font-mono">{formatPercent(totalMargin || 0)}</td>}
-                  {visibleColumns.cpm && <td className="p-3 text-right font-mono">{totalCpm ? formatCurrency(totalCpm) : "—"}</td>}
-                  {visibleColumns.clicks && <td className="p-3 text-right font-mono">{formatNumber(totals.clicks)}</td>}
-                  {visibleColumns.cpc && <td className="p-3 text-right font-mono">{totalCpc ? formatCurrency(totalCpc) : "—"}</td>}
-                  {visibleColumns.ctr && <td className="p-3 text-right font-mono">{formatPercent(totalCtr || 0)}</td>}
-                  {visibleColumns.ic && <td className="p-3 text-right font-mono">{formatNumber(totals.ic)}</td>}
-                  {visibleColumns.cpi && <td className="p-3 text-right font-mono">{totalCpi ? formatCurrency(totalCpi) : "—"}</td>}
+                  {visibleColumns.roi && <td className="p-3 text-right font-mono">{complete('profit') && complete('spend') ? percent(totalRoi) : '—'}</td>}
+                  {visibleColumns.impressions && <td className="p-3 text-right font-mono">{complete('impressions') ? number(totals.impressions) : '—'}</td>}
+                  {visibleColumns.margin && <td className="p-3 text-right font-mono">{complete('profit') && complete('revenue') ? percent(totalMargin) : '—'}</td>}
+                  {visibleColumns.cpm && <td className="p-3 text-right font-mono">{money(totalCpm, totalCurrency)}</td>}
+                  {visibleColumns.clicks && <td className="p-3 text-right font-mono">{complete('clicks') ? number(totals.clicks) : '—'}</td>}
+                  {visibleColumns.cpc && <td className="p-3 text-right font-mono">{money(totalCpc, totalCurrency)}</td>}
+                  {visibleColumns.ctr && <td className="p-3 text-right font-mono">{complete('clicks') && complete('impressions') ? percent(totalCtr) : '—'}</td>}
+                  {visibleColumns.ic && <td className="p-3 text-right font-mono">{complete('ic') ? number(totals.ic) : '—'}</td>}
+                  {visibleColumns.cpi && <td className="p-3 text-right font-mono">{money(totalCpi, totalCurrency)}</td>}
                   {visibleColumns.actions && <td className="p-3 text-center">—</td>}
                 </tr>
               </tfoot>
