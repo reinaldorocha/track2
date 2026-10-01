@@ -102,22 +102,28 @@ export async function POST(req: Request) {
     })
 
     // Disparo de notificação oficial UTM-Track
-    let notifType: SaleNotificationType = 'sale_pending'
+    let notifType: SaleNotificationType | null = null
     if (status === 'approved') notifType = 'sale_approved'
     else if (status === 'refunded') notifType = 'refund'
-    else if (paymentMethod === 'pix') notifType = 'pix_pending'
+    else if (status === 'chargeback') notifType = 'chargeback'
+    else if (status === 'pending') {
+      if (paymentMethod === 'pix') notifType = 'pix_pending'
+      else notifType = 'sale_pending'
+    }
 
-    await createSaleNotification({
-      workspaceId,
-      type: notifType,
-      amount: grossPrice,
-      currency: String(body.currency || 'BRL'),
-      platform: 'Shopify',
-      product: body.line_items?.[0]?.title,
-      saleId: sale.id,
-      transactionId: String(body.id),
-      orderId: body.order_number ? String(body.order_number) : undefined,
-    }).catch(e => console.error('Notification dispatch error:', e))
+    if (notifType) {
+      await createSaleNotification({
+        workspaceId,
+        type: notifType,
+        amount: grossPrice,
+        currency: String(body.currency || 'BRL'),
+        platform: 'Shopify',
+        product: body.line_items?.[0]?.title,
+        saleId: sale.id,
+        transactionId: String(body.id),
+        orderId: body.order_number ? String(body.order_number) : undefined,
+      }).catch(e => console.error('Notification dispatch error:', e))
+    }
 
     return NextResponse.json({ success: true, saleId: sale.id })
   } catch (error) {

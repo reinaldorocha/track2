@@ -1,4 +1,4 @@
-﻿// UTM-Track Service Worker para PWA e Push Notifications (Android / iOS / Web)
+// UTM-Track Service Worker para PWA e Push Notifications (Android / iOS / Web)
 self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
@@ -44,6 +44,7 @@ self.addEventListener("push", (event) => {
       saleId: data.saleId,
       amount: data.amount,
       currency: data.currency || "BRL",
+      product: data.product,
     },
     actions: [
       {

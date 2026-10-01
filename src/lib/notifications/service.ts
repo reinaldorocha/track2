@@ -47,6 +47,22 @@ export async function createSaleNotification(params: CreateSaleNotificationParam
     return { notification: existing, dispatched: false, reason: "idempotent_duplicate" };
   }
 
+  // Resolução do produto (caso não venha em params, tenta buscar pelo saleId)
+  let resolvedProduct = product?.trim() || "";
+  if (!resolvedProduct && saleId) {
+    try {
+      const item = await prisma.saleItem.findFirst({
+        where: { saleId },
+        select: { name: true },
+      });
+      if (item?.name) {
+        resolvedProduct = item.name.trim();
+      }
+    } catch {
+      // Ignora erro de consulta
+    }
+  }
+
   // 2. Construção dos textos conforme especificação oficial do UTM-Track
   let title = "Notificação de Venda";
   let message = "";
@@ -58,35 +74,45 @@ export async function createSaleNotification(params: CreateSaleNotificationParam
   switch (type) {
     case "sale_approved":
       title = "Venda aprovada!";
-      message = `Venda aprovada no valor de ${formattedAmount}`;
+      message = resolvedProduct
+        ? `Valor: ${formattedAmount}\nProduto: ${resolvedProduct}`
+        : `Venda aprovada no valor de ${formattedAmount}`;
       sound = "som_venda_aprovada";
       severity = "success";
       break;
 
     case "pix_pending":
       title = "Pix gerado!";
-      message = `Um Pix de ${formattedAmount} foi gerado e está aguardando pagamento.`;
+      message = resolvedProduct
+        ? `Valor: ${formattedAmount}\nProduto: ${resolvedProduct}`
+        : `Um Pix de ${formattedAmount} foi gerado e está aguardando pagamento.`;
       sound = "som_pix_gerado";
       severity = "info";
       break;
 
     case "sale_pending":
       title = "Venda pendente!";
-      message = `Venda de ${formattedAmount} aguardando confirmação.`;
+      message = resolvedProduct
+        ? `Valor: ${formattedAmount}\nProduto: ${resolvedProduct}`
+        : `Venda de ${formattedAmount} aguardando confirmação.`;
       sound = "som_venda_pendente";
       severity = "info";
       break;
 
     case "refund":
       title = "Venda reembolsada";
-      message = `Uma venda de ${formattedAmount} foi reembolsada.`;
+      message = resolvedProduct
+        ? `Valor: ${formattedAmount}\nProduto: ${resolvedProduct}`
+        : `Uma venda de ${formattedAmount} foi reembolsada.`;
       sound = "som_reembolso";
       severity = "warning";
       break;
 
     case "chargeback":
       title = "Chargeback recebido";
-      message = `Foi registrado um chargeback de ${formattedAmount}.`;
+      message = resolvedProduct
+        ? `Valor: ${formattedAmount}\nProduto: ${resolvedProduct}`
+        : `Foi registrado um chargeback de ${formattedAmount}.`;
       sound = "som_chargeback";
       severity = "error";
       break;
@@ -147,7 +173,7 @@ export async function createSaleNotification(params: CreateSaleNotificationParam
       amount,
       currency,
       platform,
-      product,
+      product: resolvedProduct || product,
       saleId,
       orderId,
       transactionId,
@@ -191,6 +217,7 @@ export async function createSaleNotification(params: CreateSaleNotificationParam
       amount,
       currency,
       platform,
+      product: resolvedProduct || undefined,
     });
   }
 

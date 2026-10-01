@@ -15,6 +15,7 @@ export interface PushPayload {
   amount?: number;
   currency?: string;
   platform?: string;
+  product?: string;
 }
 
 export interface PushDispatchResult {
@@ -43,6 +44,7 @@ export async function dispatchPushToDevices(payload: PushPayload): Promise<PushD
     amount,
     currency,
     platform,
+    product,
     notificationId,
   } = payload;
 
@@ -103,6 +105,7 @@ export async function dispatchPushToDevices(payload: PushPayload): Promise<PushD
           amount,
           currency: currency || "BRL",
           platform: platform || "",
+          product: product || "",
           notificationId,
           deepLink,
           icon: "/icon-192.png",
@@ -153,6 +156,7 @@ export async function dispatchPushToDevices(payload: PushPayload): Promise<PushD
               orderId: orderId || "",
               amount: String(amount || 0),
               currency: currency || "BRL",
+              product: product || "",
               sound,
               customSoundUrl: customSoundUrl || "",
               customSoundName: customSoundName || "",

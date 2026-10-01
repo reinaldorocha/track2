@@ -31,17 +31,17 @@ type AdvancedRow = {
 
 export default function AdvancedDashboardPage() {
   const [period, setPeriod] = useState({
-    preset: "Últimos 30 dias",
-    ...getDateRange("last30days"),
+    preset: "Hoje",
+    ...getDateRange("today"),
   });
   const [sortField, setSortField] = useState<keyof AdvancedRow>("revenue");
   const [sortAsc, setSortAsc] = useState(false);
 
   const { data, isLoading } = useQuery<{ campaigns: AdvancedRow[] }>({
-    queryKey: ["advanced-dashboard", period.from.toISOString(), period.to.toISOString()],
+    queryKey: ["advanced-dashboard", period.preset, period.from.toISOString(), period.to.toISOString()],
     queryFn: async () => {
       const res = await fetch(
-        `/api/dashboard/advanced?from=${period.from.toISOString()}&to=${period.to.toISOString()}`
+        `/api/dashboard/advanced?preset=${encodeURIComponent(period.preset)}&from=${period.from.toISOString()}&to=${period.to.toISOString()}`
       );
       if (!res.ok) throw new Error("Erro ao buscar métricas");
       return res.json();
@@ -76,10 +76,50 @@ export default function AdvancedDashboardPage() {
             Visão completa do funil de marketing e finanças por campanha: Tráfego → Conversão → Lucro
           </p>
         </div>
-        <PeriodSelector
-          value={period.preset}
-          onChange={(preset, from, to) => setPeriod({ preset, from, to, label: preset })}
-        />
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Botões Rápidos: Hoje / Ontem / 7 Dias */}
+          <div className="inline-flex items-center p-1 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setPeriod({ preset: "Hoje", ...getDateRange("today") })}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                period.preset === "Hoje"
+                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              Hoje
+            </button>
+            <button
+              type="button"
+              onClick={() => setPeriod({ preset: "Ontem", ...getDateRange("yesterday") })}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                period.preset === "Ontem"
+                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              Ontem
+            </button>
+            <button
+              type="button"
+              onClick={() => setPeriod({ preset: "Últimos 7 dias", ...getDateRange("last7days") })}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                period.preset === "Últimos 7 dias" || period.preset === "7 dias"
+                  ? "bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              }`}
+            >
+              7 Dias
+            </button>
+          </div>
+
+          <PeriodSelector
+            value={period.preset}
+            onChange={(preset, from, to) => setPeriod({ preset, from, to, label: preset })}
+          />
+        </div>
       </div>
 
       {/* Advanced Table */}

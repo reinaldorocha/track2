@@ -110,21 +110,27 @@ export async function POST(req: Request) {
     })
 
     // Disparo de notificação oficial UTM-Track
-    let notifType: SaleNotificationType = 'sale_pending'
+    let notifType: SaleNotificationType | null = null
     if (status === 'approved') notifType = 'sale_approved'
     else if (status === 'refunded') notifType = 'refund'
     else if (status === 'chargeback') notifType = 'chargeback'
-    else if (rawStatus.toLowerCase().includes('pix') || paymentMethod === 'pix') notifType = 'pix_pending'
+    else if (status === 'pending') {
+      if (rawStatus.toLowerCase().includes('pix') || paymentMethod === 'pix') notifType = 'pix_pending'
+      else notifType = 'sale_pending'
+    }
 
-    await createSaleNotification({
-      workspaceId,
-      type: notifType,
-      amount: grossPrice,
-      currency: String(body.currency || body.data?.currency || 'BRL'),
-      platform: 'Cakto',
-      saleId: sale.id,
-      transactionId: id.toString(),
-    }).catch(e => console.error('Notification dispatch error:', e))
+    if (notifType) {
+      await createSaleNotification({
+        workspaceId,
+        type: notifType,
+        amount: grossPrice,
+        currency: String(body.currency || body.data?.currency || 'BRL'),
+        platform: 'Cakto',
+        product: body.product?.name ? String(body.product.name) : undefined,
+        saleId: sale.id,
+        transactionId: id.toString(),
+      }).catch(e => console.error('Notification dispatch error:', e))
+    }
 
     return NextResponse.json({ success: true, saleId: sale.id, status })
   } catch (error) {

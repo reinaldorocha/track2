@@ -150,22 +150,27 @@ export async function POST(req: Request) {
     })
 
     // Notificação oficial com som correspondente
-    let notifType: SaleNotificationType = 'sale_pending'
+    let notifType: SaleNotificationType | null = null
     if (status === 'approved') notifType = 'sale_approved'
     else if (status === 'refunded') notifType = 'refund'
     else if (status === 'chargeback') notifType = 'chargeback'
-    else if (event === 'pix_gerado' || paymentMethod === 'pix') notifType = 'pix_pending'
+    else if (status === 'pending') {
+      if (event === 'pix_gerado' || paymentMethod === 'pix') notifType = 'pix_pending'
+      else notifType = 'sale_pending'
+    }
 
-    await createSaleNotification({
-      workspaceId,
-      type: notifType,
-      amount: grossPrice,
-      currency,
-      platform: 'Getfy',
-      product: (product.name || product.title) ? String(product.name || product.title) : undefined,
-      saleId: sale.id,
-      transactionId: orderId,
-    }).catch(e => console.error('[Getfy Webhook] Notification dispatch error:', e))
+    if (notifType) {
+      await createSaleNotification({
+        workspaceId,
+        type: notifType,
+        amount: grossPrice,
+        currency,
+        platform: 'Getfy',
+        product: (product.name || product.title) ? String(product.name || product.title) : undefined,
+        saleId: sale.id,
+        transactionId: orderId,
+      }).catch(e => console.error('[Getfy Webhook] Notification dispatch error:', e))
+    }
 
     return NextResponse.json({
       success: true,

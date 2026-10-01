@@ -110,4 +110,114 @@ describe('Ciclo Completo de Vendas, Fluxo Pix e Push Notifications', () => {
     assert.ok(pubKey && pubKey.length > 50, 'Chave VAPID pública deve estar configurada');
     assert.ok(privKey && privKey.length > 30, 'Chave VAPID privada deve estar configurada');
   });
+
+  test('Notificação com Produto e Valor: createSaleNotification inclui produto e valor na mensagem push', async () => {
+    const { createSaleNotification } = await import('../src/lib/notifications/service');
+    const { prisma } = await import('../src/lib/db');
+
+    const ws = await prisma.workspace.create({
+      data: { name: 'Test Notif Product WS', slug: `ws-notif-${Date.now()}` }
+    });
+
+    try {
+      const res = await createSaleNotification({
+        workspaceId: ws.id,
+        type: 'sale_approved',
+        amount: 37,
+        currency: 'BRL',
+        product: 'PMMA - COMBO DE 4 SIMULADOS COMENTADOS',
+        transactionId: `tx_notif_prod_${Date.now()}`,
+      });
+
+      assert.ok(res.notification, 'Notificação deve ser criada');
+      assert.strictEqual(res.notification.title, 'Venda aprovada!');
+      assert.ok(res.notification.message.includes('37,00'), 'Mensagem deve conter o valor');
+      assert.ok(res.notification.message.includes('PMMA - COMBO DE 4 SIMULADOS COMENTADOS'), 'Mensagem deve conter o nome do produto');
+      assert.strictEqual(res.notification.product, 'PMMA - COMBO DE 4 SIMULADOS COMENTADOS');
+    } finally {
+      await prisma.notification.deleteMany({ where: { workspaceId: ws.id } });
+      await prisma.workspace.delete({ where: { id: ws.id } });
+    }
+  });
+
+  test('Getfy Webhook: Evento pedido_cancelado com paymentMethod pix NÃO dispara notificação de Pix Gerado', async () => {
+    const { POST: getfyPost } = await import('../src/app/api/webhooks/getfy/route');
+    const { prisma } = await import('../src/lib/db');
+
+    const ws = await prisma.workspace.create({
+      data: { name: 'Test Getfy Cancelled WS', slug: `ws-getfy-cancel-${Date.now()}` }
+    });
+
+    const integration = await prisma.integration.create({
+      data: {
+        workspaceId: ws.id,
+        platform: 'getfy',
+        name: 'Getfy Test',
+        webhookSecret: `whsec_getfy_${Date.now()}`
+      }
+    });
+
+    try {
+      const rawPayload = {
+        event: "pedido_cancelado",
+        event_label: "Pedido cancelado",
+        payload: {
+          order: {
+            id: 999362,
+            status: "cancelled",
+            amount: 37,
+            currency: "BRL",
+            is_renewal: false,
+            created_at: "2026-09-30T19:17:13-03:00"
+          },
+          customer: {
+            name: "Hugo Bezerra",
+            email: "hugocosta2026ofc@outlook.com",
+            phone: "5598985107347",
+            docNumber: "60983524378",
+            docType: "cpf"
+          },
+          product: {
+            id: "23ae3e99-5963-41c8-b72d-cf08bf8de56c",
+            name: "PMMA - COMBO DE 4 SIMULADOS COMENTADOS",
+            billing_type: "one_time"
+          },
+          payment: {
+            method: "pix",
+            gateway: "mercadopago",
+            gateway_transaction_id: "181699481596"
+          },
+          amount: 37,
+          status: "cancelled",
+          paymentMethod: "pix"
+        },
+        timestamp: "2026-10-01T19:21:32-03:00"
+      };
+
+      const req = new Request(`http://localhost/api/webhooks/getfy?token=${integration.webhookSecret}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rawPayload)
+      });
+
+      const res = await getfyPost(req);
+      assert.strictEqual(res.status, 200);
+
+      const json = await res.json();
+      assert.strictEqual(json.status, 'cancelled');
+
+      // Verifica se alguma notificação foi gerada
+      const notifs = await prisma.notification.findMany({
+        where: { workspaceId: ws.id }
+      });
+      assert.strictEqual(notifs.length, 0, 'Pedido cancelado não deve gerar notificação de Pix Gerado');
+    } finally {
+      await prisma.saleItem.deleteMany({ where: { sale: { workspaceId: ws.id } } });
+      await prisma.sale.deleteMany({ where: { workspaceId: ws.id } });
+      await prisma.webhookEvent.deleteMany({ where: { workspaceId: ws.id } });
+      await prisma.notification.deleteMany({ where: { workspaceId: ws.id } });
+      await prisma.integration.deleteMany({ where: { workspaceId: ws.id } });
+      await prisma.workspace.delete({ where: { id: ws.id } });
+    }
+  });
 });

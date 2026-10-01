@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
+import { resolveAnalyticsInterval } from '@/lib/meta/insight-helpers'
 import {
   calcCPM, calcCPC, calcCTR, calcCPI, calcCPA, calcROAS, calcROI, calcMargin, calcProfit
 } from '@/lib/metrics'
@@ -17,18 +18,28 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const fromStr = searchParams.get('from')
     const toStr = searchParams.get('to')
+    const preset = searchParams.get('preset')
 
-    const from = fromStr ? new Date(fromStr) : new Date(Date.now() - 30 * 86400000)
-    const to = toStr ? new Date(toStr) : new Date()
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { timezone: true }
+    })
+    const tz = workspace?.timezone || 'America/Sao_Paulo'
+    const interval = resolveAnalyticsInterval(preset || null, tz, fromStr, toStr)
+
+    const isAllTime = preset && (preset.toLowerCase() === 'all' || preset.toLowerCase() === 'todas' || preset.toLowerCase().includes('todo'))
+
+    const insightsWhere: any = {}
+    if (!isAllTime) {
+      insightsWhere.dateStart = { gte: interval.insightDateStart }
+      insightsWhere.dateStop = { lte: interval.insightDateStop }
+    }
 
     const campaigns = await prisma.campaign.findMany({
       where: { workspaceId },
       include: {
         insights: {
-          where: {
-            dateStart: { gte: from },
-            dateStop: { lte: to }
-          }
+          where: insightsWhere
         },
         adSets: {
           include: {
@@ -39,8 +50,18 @@ export async function GET(req: Request) {
     })
 
     // Buscar vendas com atribuição para cruzar
+    const attributionsWhere: any = { workspaceId }
+    if (!isAllTime) {
+      attributionsWhere.sale = {
+        orderedAt: {
+          gte: interval.saleFrom,
+          lt: interval.saleTo
+        }
+      }
+    }
+
     const attributions = await prisma.attributionRecord.findMany({
-      where: { workspaceId },
+      where: attributionsWhere,
       include: {
         sale: true
       }

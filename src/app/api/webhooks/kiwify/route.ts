@@ -136,22 +136,27 @@ export async function POST(req: Request) {
     })
 
     // Disparo de notificação oficial com som correspondente
-    let notifType: SaleNotificationType = 'sale_pending'
+    let notifType: SaleNotificationType | null = null
     if (status === 'approved') notifType = 'sale_approved'
     else if (status === 'refunded') notifType = 'refund'
     else if (status === 'chargeback') notifType = 'chargeback'
-    else if (rawStatus.toLowerCase().includes('pix') || paymentMethod === 'pix') notifType = 'pix_pending'
+    else if (status === 'pending') {
+      if (rawStatus.toLowerCase().includes('pix') || paymentMethod === 'pix') notifType = 'pix_pending'
+      else notifType = 'sale_pending'
+    }
 
-    await createSaleNotification({
-      workspaceId,
-      type: notifType,
-      amount: grossPrice,
-      currency: String(commissions.currency || payload.currency || 'BRL'),
-      platform: 'Kiwify',
-      product: product.product_name ? String(product.product_name) : undefined,
-      saleId: sale.id,
-      transactionId: orderId,
-    }).catch(e => console.error('[Kiwify Webhook] Notification dispatch error:', e))
+    if (notifType) {
+      await createSaleNotification({
+        workspaceId,
+        type: notifType,
+        amount: grossPrice,
+        currency: String(commissions.currency || payload.currency || 'BRL'),
+        platform: 'Kiwify',
+        product: product.product_name ? String(product.product_name) : undefined,
+        saleId: sale.id,
+        transactionId: orderId,
+      }).catch(e => console.error('[Kiwify Webhook] Notification dispatch error:', e))
+    }
 
     return NextResponse.json({
       success: true,

@@ -188,24 +188,30 @@ export async function POST(req: Request) {
     })
 
     // Disparo de notificação oficial UTM-Track com som correspondente
-    let notifType: SaleNotificationType = 'sale_pending'
+    let notifType: SaleNotificationType | null = null
     if (status === 'approved') notifType = 'sale_approved'
     else if (status === 'refunded') notifType = 'refund'
     else if (status === 'chargeback') notifType = 'chargeback'
-    else if (event.includes('PIX') || paymentMethod === 'pix' || event === 'PURCHASE_BILLET_PRINTED') {
-      notifType = paymentMethod === 'pix' || event.includes('PIX') ? 'pix_pending' : 'sale_pending'
+    else if (status === 'pending') {
+      if (event.includes('PIX') || paymentMethod === 'pix') {
+        notifType = 'pix_pending'
+      } else {
+        notifType = 'sale_pending'
+      }
     }
 
-    await createSaleNotification({
-      workspaceId,
-      type: notifType,
-      amount: grossPrice,
-      currency: String(priceObj.currency_code || purchase.currency || 'BRL'),
-      platform: 'Hotmart',
-      product: product.name ? String(product.name) : undefined,
-      saleId: sale.id,
-      transactionId: transaction,
-    }).catch(e => console.error('[Hotmart Webhook] Notification dispatch error:', e))
+    if (notifType) {
+      await createSaleNotification({
+        workspaceId,
+        type: notifType,
+        amount: grossPrice,
+        currency: String(priceObj.currency_code || purchase.currency || 'BRL'),
+        platform: 'Hotmart',
+        product: product.name ? String(product.name) : undefined,
+        saleId: sale.id,
+        transactionId: transaction,
+      }).catch(e => console.error('[Hotmart Webhook] Notification dispatch error:', e))
+    }
 
     return NextResponse.json({ 
       success: true, 
