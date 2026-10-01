@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { initializeNativePush, isNativePlatform } from "@/lib/mobile/native-bridge";
@@ -10,13 +10,15 @@ import {
   setupPushMessageListener,
 } from "@/lib/mobile/pwa-push";
 import { playNotificationSound } from "@/lib/sound";
-import { Bell, CheckCircle2, Sparkles, X, AlertCircle } from "lucide-react";
+import { Bell, CheckCircle2, Sparkles, X, AlertCircle, Smartphone, Share } from "lucide-react";
 
 export function MobileClientInit() {
   const [showPrompt, setShowPrompt] = useState(false);
   const [isActivating, setIsActivating] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isIosBrowser, setIsIosBrowser] = useState(false);
+  const [devicePlatform, setDevicePlatform] = useState<"android" | "ios" | "web">("web");
 
   useEffect(() => {
     // 1. Se estiver rodando dentro do Capacitor Nativo (APK Android / iOS)
@@ -25,7 +27,25 @@ export function MobileClientInit() {
       return;
     }
 
-    // 2. Se for PWA / Navegador (Android Chrome, Desktop, iOS 16.4+)
+    // 2. Detecção de plataforma
+    if (typeof window !== "undefined") {
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const isStandalone =
+        ("standalone" in window.navigator && (window.navigator as any).standalone) ||
+        window.matchMedia("(display-mode: standalone)").matches;
+
+      if (isIOS) {
+        setDevicePlatform("ios");
+        if (!isStandalone) {
+          setIsIosBrowser(true);
+        }
+      } else if (isAndroid) {
+        setDevicePlatform("android");
+      }
+    }
+
+    // 3. Se for PWA / Navegador (Android Chrome, Desktop, iOS 16.4+)
     if (isWebPushSupported()) {
       registerServiceWorker();
       setupPushMessageListener();
@@ -38,13 +58,22 @@ export function MobileClientInit() {
           console.debug("[PWA] Erro ao sincronizar token existente:", err);
         });
       } else if (perm === "default") {
-        // Verifica se o usuário não dispensou o aviso nesta sessão
         const dismissed = sessionStorage.getItem("utmtrack_pwa_notif_dismissed");
         if (!dismissed) {
-          // Exibe o banner após 1.5s para não conflitar com o carregamento inicial
           const timer = setTimeout(() => {
             setShowPrompt(true);
           }, 1500);
+          return () => clearTimeout(timer);
+        }
+      }
+    } else {
+      // Se for iOS no navegador Safari (sem suporte direto antes de adicionar à tela de início)
+      if (typeof window !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        const dismissed = sessionStorage.getItem("utmtrack_pwa_notif_dismissed");
+        if (!dismissed) {
+          const timer = setTimeout(() => {
+            setShowPrompt(true);
+          }, 2000);
           return () => clearTimeout(timer);
         }
       }
@@ -60,10 +89,8 @@ export function MobileClientInit() {
 
       if (result.success) {
         setIsSuccess(true);
-        // Toca o som de validação
         playNotificationSound("som_venda_aprovada");
 
-        // Dispara uma notificação de teste real pelo servidor para confirmar o push no Android
         try {
           await fetch("/api/notifications/test", {
             method: "POST",
@@ -71,7 +98,10 @@ export function MobileClientInit() {
             body: JSON.stringify({
               type: "sale_approved",
               title: "💰 Notificações Ativadas!",
-              message: "Seu celular Android agora receberá alertas de vendas e Pix em tempo real.",
+              message:
+                devicePlatform === "ios"
+                  ? "Seu iPhone agora receberá alertas sonoros de vendas em tempo real."
+                  : "Seu celular Android agora receberá alertas de vendas e Pix em tempo real.",
             }),
           });
         } catch (e) {
@@ -84,7 +114,7 @@ export function MobileClientInit() {
       } else {
         if (result.permission === "denied") {
           setErrorMessage(
-            "Permissão bloqueada no navegador. Toque no ícone de cadeado/configurações ao lado da URL para permitir notificações."
+            "Permissão bloqueada nas configurações. Acesse os Ajustes do seu navegador para permitir notificações do UTM-Track."
           );
         } else {
           setErrorMessage(result.error || "Não foi possível ativar as notificações.");
@@ -126,11 +156,54 @@ export function MobileClientInit() {
             <div>
               <div className="text-sm font-bold text-emerald-300">Notificações Ativadas!</div>
               <div className="text-xs text-slate-300">
-                Seu aparelho agora receberá alertas sonoros instantâneos de cada venda.
+                Seu {devicePlatform === "ios" ? "iPhone" : "aparelho"} agora receberá alertas sonoros instantâneos de cada venda.
               </div>
             </div>
           </div>
+        ) : isIosBrowser ? (
+          /* Instrução especial para iPhone no Safari (requisito oficial da Apple para Web Push) */
+          <div className="space-y-2.5">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0 mt-0.5">
+                <Smartphone className="w-5 h-5" />
+              </div>
+              <div className="pr-4">
+                <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-400 uppercase tracking-wider mb-0.5">
+                  <Sparkles className="w-3 h-3" /> Requisito Apple iOS 16.4+
+                </div>
+                <h4 className="text-sm font-bold text-white leading-tight">
+                  Ativar Notificações no iPhone
+                </h4>
+                <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                  Para liberar alertas e som no iOS, adicione o app à sua tela de início:
+                </p>
+              </div>
+            </div>
+
+            <div className="text-xs bg-white/5 border border-white/10 rounded-xl p-2.5 space-y-1.5 text-slate-200">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-sky-500/30 text-sky-300 flex items-center justify-center text-[10px] font-bold">1</span>
+                <span>Toque no botão <strong>Compartilhar</strong> na barra do Safari (⎋)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-sky-500/30 text-sky-300 flex items-center justify-center text-[10px] font-bold">2</span>
+                <span>Selecione <strong>"Adicionar à Tela de Início"</strong></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-sky-500/30 text-sky-300 flex items-center justify-center text-[10px] font-bold">3</span>
+                <span>Abra o UTM-Track pelo ícone na tela do iPhone para ativar!</span>
+              </div>
+            </div>
+
+            <button
+              onClick={handleDismiss}
+              className="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow-md transition"
+            >
+              Entendido
+            </button>
+          </div>
         ) : (
+          /* Android e iPhone PWA Standalone */
           <div className="space-y-3">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0 mt-0.5">
@@ -138,7 +211,7 @@ export function MobileClientInit() {
               </div>
               <div className="pr-4">
                 <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-400 uppercase tracking-wider mb-0.5">
-                  <Sparkles className="w-3 h-3" /> Alertas no Celular Android
+                  <Sparkles className="w-3 h-3" /> Alertas no {devicePlatform === "ios" ? "iPhone (iOS)" : "Celular Android"}
                 </div>
                 <h4 className="text-sm font-bold text-white leading-tight">
                   Ativar Notificações de Vendas?
