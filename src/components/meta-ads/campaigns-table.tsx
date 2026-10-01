@@ -54,6 +54,14 @@ export interface MetaTableItem {
   currency?: string;
   realSalesCount?: number;
   cpa: number | null;
+  cpaMeta?: number | null;
+  taxes?: number | null;
+  taxesBreakdown?: {
+    salesTaxRate: number;
+    metaAdsTaxRate: number;
+    salesTaxAmount: number;
+    metaTaxAmount: number;
+  } | null;
   revenue: number | null;
   netRevenue: number | null;
   profit: number | null;
@@ -169,6 +177,8 @@ export function CampaignsTable({
     sales: true,
     metaPurchases: true,
     cpa: true,
+    cpaMeta: true,
+    taxes: true,
     revenue: true,
     netRevenue: true,
     profit: true,
@@ -384,6 +394,8 @@ export function CampaignsTable({
     (acc, curr) => {
       acc.spend += curr.spend || 0;
       acc.sales += curr.sales || 0;
+      acc.metaPurchases += curr.metaPurchases || 0;
+      acc.taxes += curr.taxes || 0;
       acc.revenue += curr.revenue || 0;
       acc.netRevenue += curr.netRevenue ?? 0;
       acc.profit += curr.profit || 0;
@@ -392,15 +404,17 @@ export function CampaignsTable({
       acc.ic += curr.ic || 0;
       return acc;
     },
-    { spend: 0, sales: 0, revenue: 0, netRevenue: 0, profit: 0, impressions: 0, clicks: 0, ic: 0 }
+    { spend: 0, sales: 0, metaPurchases: 0, taxes: 0, revenue: 0, netRevenue: 0, profit: 0, impressions: 0, clicks: 0, ic: 0 }
   );
 
   const oneCurrency = new Set(sortedItems.map(i => i.currency || 'BRL')).size <= 1;
-  const monetaryFields: Array<keyof MetaTableItem> = ['spend', 'revenue', 'netRevenue', 'profit', 'cpa', 'cpm', 'cpc', 'cpi', 'roas', 'grossRoas', 'budget'];
+  const monetaryFields: Array<keyof MetaTableItem> = ['spend', 'revenue', 'netRevenue', 'profit', 'cpa', 'cpaMeta', 'taxes', 'cpm', 'cpc', 'cpi', 'roas', 'grossRoas', 'budget'];
   const complete = (field: keyof MetaTableItem) => (!monetaryFields.includes(field) || oneCurrency) && sortedItems.every(i => i[field] != null);
   const totalCurrency = sortedItems[0]?.currency || 'BRL';
 
   const totalCpa = complete('spend') && totals.sales > 0 ? totals.spend / totals.sales : null;
+  const totalCpaMeta = complete('spend') && totals.metaPurchases > 0 ? totals.spend / totals.metaPurchases : null;
+  const totalTaxes = totals.taxes;
   const totalRoas = complete('spend') && complete('netRevenue') && totals.spend > 0 ? totals.netRevenue / totals.spend : null;
   const totalRoi = totals.spend > 0 ? (totals.profit / totals.spend) * 100 : null;
   const totalMargin = totals.revenue > 0 ? (totals.profit / totals.revenue) * 100 : null;
@@ -418,7 +432,9 @@ export function CampaignsTable({
       "Gasto (moeda da conta)",
       "Vendas",
       "Compras Meta",
-      "CPA (moeda da conta)",
+      "CPA Real (moeda da conta)",
+      "CPA Meta (moeda da conta)",
+      "Impostos (moeda da conta)",
       "Faturamento (moeda da conta)",
       "Receita Líquida (moeda da conta)",
       "Lucro Líquido Real (moeda da conta)",
@@ -446,6 +462,8 @@ export function CampaignsTable({
           item.sales,
           item.metaPurchases ?? "",
           item.cpa !== null ? item.cpa.toFixed(2) : "",
+          item.cpaMeta !== null && item.cpaMeta !== undefined ? item.cpaMeta.toFixed(2) : "",
+          item.taxes !== null && item.taxes !== undefined ? item.taxes.toFixed(2) : "",
           item.revenue?.toFixed(2) ?? "",
           item.netRevenue?.toFixed(2) ?? "",
           item.profit?.toFixed(2) ?? "",
@@ -692,6 +710,14 @@ export function CampaignsTable({
                       />
                       {col === "netRevenue"
                         ? "Líquido Real"
+                        : col === "cpa"
+                        ? "CPA Real"
+                        : col === "cpaMeta"
+                        ? "CPA Meta"
+                        : col === "taxes"
+                        ? "Impostos"
+                        : col === "metaPurchases"
+                        ? "Compras Meta"
                         : col === "recommendation"
                         ? "Recomendação"
                         : col === "actions"
@@ -874,9 +900,25 @@ export function CampaignsTable({
 
                 {visibleColumns.metaPurchases && <th className="p-3 text-right" title="Compras segundo a atribuição configurada nos conjuntos da Meta">Compras Meta</th>}
                 {visibleColumns.cpa && (
-                  <th onClick={() => handleSort("cpa")} className="p-3 text-right cursor-pointer hover:text-blue-600">
+                  <th onClick={() => handleSort("cpa")} className="p-3 text-right cursor-pointer hover:text-blue-600" title="CPA Real = Gasto Meta ÷ Vendas Plataforma">
                     <div className="flex items-center justify-end gap-1">
-                      <span>CPA</span>
+                      <span>CPA Real</span>
+                      <ArrowUpDown className="w-3 h-3" />
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.cpaMeta && (
+                  <th onClick={() => handleSort("cpaMeta")} className="p-3 text-right cursor-pointer hover:text-blue-600" title="CPA Meta = Gasto Meta ÷ Compras Meta (Pixel/CAPI/CSV)">
+                    <div className="flex items-center justify-end gap-1">
+                      <span>CPA Meta</span>
+                      <ArrowUpDown className="w-3 h-3" />
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.taxes && (
+                  <th onClick={() => handleSort("taxes")} className="p-3 text-right cursor-pointer hover:text-blue-600" title="Impostos calculados conforme o cadastro de taxas ativas">
+                    <div className="flex items-center justify-end gap-1">
+                      <span>Impostos</span>
                       <ArrowUpDown className="w-3 h-3" />
                     </div>
                   </th>
@@ -1146,8 +1188,25 @@ export function CampaignsTable({
 
                       {visibleColumns.metaPurchases && <td className="p-3 text-right font-mono" title={attributionLabel(item.metaAttribution)}>{number(item.metaPurchases)}</td>}
                       {visibleColumns.cpa && (
-                        <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-200">
+                        <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-200" title="CPA Real (Gasto Meta ÷ Vendas Plataforma)">
                           {money(item.cpa, item.currency)}
+                        </td>
+                      )}
+                      {visibleColumns.cpaMeta && (
+                        <td className="p-3 text-right font-mono text-purple-600 dark:text-purple-400" title="CPA Meta (Gasto Meta ÷ Compras Meta)">
+                          {money(item.cpaMeta, item.currency)}
+                        </td>
+                      )}
+                      {visibleColumns.taxes && (
+                        <td
+                          className="p-3 text-right font-mono text-amber-700 dark:text-amber-400"
+                          title={
+                            item.taxesBreakdown
+                              ? `Imposto Vendas: ${money(item.taxesBreakdown.salesTaxAmount, item.currency)} (${item.taxesBreakdown.salesTaxRate}%) | Imposto Anúncios: ${money(item.taxesBreakdown.metaTaxAmount, item.currency)} (${item.taxesBreakdown.metaAdsTaxRate}%)`
+                              : "Impostos calculados sobre faturamento e gasto"
+                          }
+                        >
+                          {item.taxes != null ? money(item.taxes, item.currency) : "—"}
                         </td>
                       )}
 
@@ -1287,6 +1346,8 @@ export function CampaignsTable({
                   {visibleColumns.sales && <td className="p-3 text-right font-mono">{formatNumber(totals.sales)}</td>}
                   {visibleColumns.metaPurchases && <td className="p-3 text-right font-mono">{complete('metaPurchases') ? number(sortedItems.reduce((n, i) => n + (i.metaPurchases ?? 0), 0)) : '—'}</td>}
                   {visibleColumns.cpa && <td className="p-3 text-right font-mono">{money(totalCpa, totalCurrency)}</td>}
+                  {visibleColumns.cpaMeta && <td className="p-3 text-right font-mono text-purple-600 dark:text-purple-400">{money(totalCpaMeta, totalCurrency)}</td>}
+                  {visibleColumns.taxes && <td className="p-3 text-right font-mono text-amber-700 dark:text-amber-400">{money(totalTaxes, totalCurrency)}</td>}
                   {visibleColumns.revenue && <td className="p-3 text-right font-mono text-blue-600 dark:text-blue-400">{complete('revenue') ? money(totals.revenue, totalCurrency) : '—'}</td>}
                   {visibleColumns.netRevenue && <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400">{complete('netRevenue') ? money(totals.netRevenue, totalCurrency) : '—'}</td>}
                   {visibleColumns.profit && (

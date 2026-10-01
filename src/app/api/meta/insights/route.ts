@@ -60,6 +60,20 @@ export async function GET(req: Request) {
     }))
     const covered = new Map(coverage.map(c => [c.accountId, c.complete]))
     const attributionSpecs = await prisma.adSet.findMany({ where: { campaign: { adAccountId: { in: accountIds } } }, select: { id: true, campaignId: true, attributionSpec: true } })
+    const taxes = await prisma.tax.findMany({ where: { workspaceId, isActive: true } })
+    const metaAdsTaxes = taxes.filter(t => {
+      const tp = (t.type || '').toLowerCase().trim()
+      const nm = (t.name || '').toLowerCase().trim()
+      return tp === 'meta_ads' || nm.includes('meta') || nm.includes('iof') || nm.includes('anúncio') || nm.includes('anuncio') || nm.includes('trafego')
+    })
+    const salesTaxes = taxes.filter(t => {
+      const tp = (t.type || '').toLowerCase().trim()
+      const nm = (t.name || '').toLowerCase().trim()
+      return !(tp === 'meta_ads' || nm.includes('meta') || nm.includes('iof') || nm.includes('anúncio') || nm.includes('anuncio') || nm.includes('trafego'))
+    })
+    const metaAdsTaxRate = metaAdsTaxes.reduce((sum, t) => sum + (t.percentage || 0), 0)
+    const salesTaxRate = salesTaxes.reduce((sum, t) => sum + (t.percentage || 0), 0)
+
     const eligible = rows.filter(row => {
       const range = dates.get(row.accountId)!
       row.insights = row.insights.filter(i => { const d = i.dateStart.toISOString().slice(0, 10); return d >= range.from && d <= range.to })
@@ -85,9 +99,22 @@ export async function GET(req: Request) {
       const specs = attributionSpecs.filter(as => level === 'campaign' ? as.campaignId === row.id : level === 'adset' ? as.id === row.id : as.id === row.adSetId)
       const uniqueSpecs = [...new Set(specs.map(as => as.attributionSpec).filter((value): value is string => Boolean(value)))]
       const metaAttribution = uniqueSpecs.length === 1 && specs.every(as => as.attributionSpec) ? uniqueSpecs[0] : null
+
+      const metaPurchases = complete ? m.metaPurchases : null
+      const cpaMeta = complete && metaPurchases !== null && metaPurchases > 0 && spend !== null ? Math.round((spend / metaPurchases) * 100) / 100 : null
+      const metaTaxAmount = spend !== null && metaAdsTaxRate > 0 ? (spend * (metaAdsTaxRate / 100)) : 0
+      const salesTaxAmount = revenue !== null && salesTaxRate > 0 ? (revenue * (salesTaxRate / 100)) : 0
+      const taxesAmount = (spend !== null || revenue !== null) ? Math.round((metaTaxAmount + salesTaxAmount) * 100) / 100 : null
+      const taxesBreakdown = {
+        salesTaxRate,
+        metaAdsTaxRate,
+        salesTaxAmount: Math.round(salesTaxAmount * 100) / 100,
+        metaTaxAmount: Math.round(metaTaxAmount * 100) / 100,
+      }
+
       return { id: row.id, externalId: row.externalId, name: row.name, status: row.status, budget: row.budget, parentName: row.parentName, campaignName: row.campaignName, adAccountName: row.accountName, previewUrl: row.previewUrl, currency: row.currency,
-        spend, impressions, clicks, sales: matched.length, metaPurchases: complete ? m.metaPurchases : null, metaAttribution, revenue, netRevenue, profit,
-        cpa: ratio(spend, matched.length), roas: ratio(netRevenue, spend), grossRoas: ratio(revenue, spend), roi: profit !== null && spend !== null && spend > 0 ? profit / spend * 100 : null,
+        spend, impressions, clicks, sales: matched.length, metaPurchases, metaAttribution, revenue, netRevenue, profit,
+        cpa: ratio(spend, matched.length), cpaMeta, taxes: taxesAmount, taxesBreakdown, roas: ratio(netRevenue, spend), grossRoas: ratio(revenue, spend), roi: profit !== null && spend !== null && spend > 0 ? profit / spend * 100 : null,
         margin: profit !== null && revenue !== null && revenue > 0 ? profit / revenue * 100 : null,
         cpm: spend !== null && impressions !== null && impressions > 0 ? spend / impressions * 1000 : null, cpc: ratio(spend, clicks),
         ctr: clicks !== null && impressions !== null && impressions > 0 ? clicks / impressions * 100 : null, ic: complete ? m.ic : null,
