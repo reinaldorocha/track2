@@ -733,6 +733,7 @@ export async function importMetaAdsCsv(
         since: minDate,
         until: maxDate,
         source: 'csv_import',
+        history: true,
         campaigns: campaignsMap.size,
         adSets: adSetsMap.size,
         ads: adsMap.size

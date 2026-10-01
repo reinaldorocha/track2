@@ -116,10 +116,19 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string, 
     })
     const todayStr = formatter.format(new Date())
     const lastFullSync = await prisma.syncLog.findFirst({
-      where: { workspaceId, adAccountId: account.id, type: 'meta_ads', status: 'success', startedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, details: { contains: '"history":true' } },
+      where: {
+        workspaceId,
+        adAccountId: account.id,
+        type: 'meta_ads',
+        status: 'success',
+        details: { contains: '"history":true' }
+      },
       orderBy: { startedAt: 'desc' }
     })
-    const history = !lastFullSync
+    const hasAnyInsights = await prisma.campaignInsight.findFirst({
+      where: { campaign: { adAccountId: account.id } }
+    })
+    const history = !lastFullSync && !hasAnyInsights
     const sinceStr = formatter.format(new Date(Date.now() - (history ? 95 : 7) * 86400000))
 
     const campaignDbMap = new Map<string, string>() // externalId -> dbId
@@ -278,8 +287,10 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string, 
         const campaignDbId = campaignDbMap.get(ins.campaign_id || '')
         if (!campaignDbId) continue
 
-        const dateStart = new Date(ins.date_start)
-        const dateStop = new Date(ins.date_stop)
+        const [y1, m1, d1] = ins.date_start.split('-').map(Number)
+        const [y2, m2, d2] = ins.date_stop.split('-').map(Number)
+        const dateStart = new Date(Date.UTC(y1, m1 - 1, d1, 0, 0, 0, 0))
+        const dateStop = new Date(Date.UTC(y2, m2 - 1, d2, 23, 59, 59, 999))
         const spend = Number(ins.spend) || 0
         const impressions = Number(ins.impressions) || 0
         const reach = Number(ins.reach) || 0
@@ -343,8 +354,10 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string, 
           const adSetDbId = adSetDbMap.get(ins.adset_id || '')
           if (!adSetDbId) continue
 
-          const dateStart = new Date(ins.date_start)
-          const dateStop = new Date(ins.date_stop)
+          const [y1, m1, d1] = ins.date_start.split('-').map(Number)
+          const [y2, m2, d2] = ins.date_stop.split('-').map(Number)
+          const dateStart = new Date(Date.UTC(y1, m1 - 1, d1, 0, 0, 0, 0))
+          const dateStop = new Date(Date.UTC(y2, m2 - 1, d2, 23, 59, 59, 999))
           const spend = Number(ins.spend) || 0
           const impressions = Number(ins.impressions) || 0
           const reach = Number(ins.reach) || 0
@@ -411,8 +424,10 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string, 
           const adDbId = adDbMap.get(ins.ad_id || '')
           if (!adDbId) continue
 
-          const dateStart = new Date(ins.date_start)
-          const dateStop = new Date(ins.date_stop)
+          const [y1, m1, d1] = ins.date_start.split('-').map(Number)
+          const [y2, m2, d2] = ins.date_stop.split('-').map(Number)
+          const dateStart = new Date(Date.UTC(y1, m1 - 1, d1, 0, 0, 0, 0))
+          const dateStop = new Date(Date.UTC(y2, m2 - 1, d2, 23, 59, 59, 999))
           const spend = Number(ins.spend) || 0
           const impressions = Number(ins.impressions) || 0
           const reach = Number(ins.reach) || 0
