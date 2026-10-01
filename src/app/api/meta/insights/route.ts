@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
 import { resolveRange, nextDay, midnight, measure, assignSales, hasCompleteCoverage, type MetaInsight } from '@/lib/meta/insight-helpers'
+import { summarizeMetaSyncError } from '@/lib/meta/rate-limit'
 
 type Row = { id: string; externalId: string; name: string; status: string; budget: number | null; accountId: string; accountName: string; currency: string; campaignId?: string; adSetId?: string; parentName?: string; campaignName?: string; previewUrl?: string | null; insights: MetaInsight[] }
 
@@ -55,7 +56,7 @@ export async function GET(req: Request) {
       const latest = logs[0]
       const spans = logs.filter(log => log.status === 'success' && log.details).flatMap(log => { try { const d = JSON.parse(log.details!); return [{ since: d.since as string, until: d.until as string }] } catch { return [] } })
       const complete = hasCompleteCoverage(range.from, range.to, latest?.status, spans)
-      return { accountId: a.id, from: range.from, to: range.to, complete, lastSyncAt: a.lastSyncAt, error: logs[0]?.status === 'partial' || logs[0]?.status === 'failed' ? logs[0].errorMessage : null }
+      return { accountId: a.id, from: range.from, to: range.to, complete, lastSyncAt: a.lastSyncAt, error: logs[0]?.status === 'partial' || logs[0]?.status === 'failed' ? summarizeMetaSyncError(logs[0].errorMessage) : null }
     }))
     const covered = new Map(coverage.map(c => [c.accountId, c.complete]))
     const attributionSpecs = await prisma.adSet.findMany({ where: { campaign: { adAccountId: { in: accountIds } } }, select: { id: true, campaignId: true, attributionSpec: true } })

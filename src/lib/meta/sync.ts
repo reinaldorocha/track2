@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { decrypt } from '@/lib/encryption'
 import { MetaApiClient, MetaApiError, type MetaAction } from './client'
+import { metaCooldownRemaining, summarizeMetaSyncError } from './rate-limit'
 
 export interface SyncResult {
   success: boolean
@@ -10,6 +11,7 @@ export interface SyncResult {
   insights: number
   errors: string[]
   reconnectRequired?: boolean
+  rateLimited?: boolean
 }
 export function parseConversions(
   actions: MetaAction[] | undefined | null,
@@ -67,6 +69,17 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       return { success: false, campaigns: 0, adSets: 0, ads: 0, insights: 0, errors: ['Nenhum token configurado para esta conta'] }
     }
 
+    const previousSync = await prisma.syncLog.findFirst({
+      where: { workspaceId, adAccountId: account.id, type: 'meta_ads', status: { in: ['success', 'partial', 'failed'] } },
+      orderBy: { startedAt: 'desc' },
+      select: { startedAt: true, errorMessage: true },
+    })
+    const cooldown = previousSync ? metaCooldownRemaining(previousSync.startedAt, previousSync.errorMessage) : 0
+    if (cooldown > 0) {
+      return { success: false, campaigns: 0, adSets: 0, ads: 0, insights: 0,
+        errors: [`Limite da Meta ativo. Nova tentativa em cerca de ${Math.ceil(cooldown / 60000)} minuto(s).`], rateLimited: true }
+    }
+
     let token: string
     try {
       token = decrypt(account.accessTokenEnc)
@@ -113,6 +126,22 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
     const adSetDbMap = new Map<string, string>() // externalId -> dbId
     const adDbMap = new Map<string, string>() // externalId -> dbId
 
+    // Consultar cada coleção uma vez por conta evita uma requisição por campanha/conjunto.
+    const accountAdSets = await client.getAccountAdSets(account.externalId)
+    const accountAds = await client.getAccountAds(account.externalId)
+    const adSetsByCampaign = new Map<string, typeof accountAdSets>()
+    for (const adSet of accountAdSets) {
+      const group = adSetsByCampaign.get(adSet.campaign_id) || []
+      group.push(adSet)
+      adSetsByCampaign.set(adSet.campaign_id, group)
+    }
+    const adsByAdSet = new Map<string, typeof accountAds>()
+    for (const ad of accountAds) {
+      const group = adsByAdSet.get(ad.adset_id) || []
+      group.push(ad)
+      adsByAdSet.set(ad.adset_id, group)
+    }
+
     for (const c of campaigns) {
       const dbCampaign = await prisma.campaign.upsert({
         where: {
@@ -152,7 +181,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
 
       // 2. Sincronizar Conjuntos de Anúncios (AdSets)
       try {
-        const adSets = await client.getAdSets(c.id)
+        const adSets = adSetsByCampaign.get(c.id) || []
         totalAdSets += adSets.length
         
         for (const as of adSets) {
@@ -198,7 +227,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
 
           // 3. Sincronizar Anúncios (Ads)
           try {
-            const ads = await client.getAds(as.id)
+            const ads = adsByAdSet.get(as.id) || []
             totalAds += ads.length
 
             for (const ad of ads) {
@@ -231,15 +260,11 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
               adDbMap.set(ad.id, dbAd.id)
             }
           } catch (adErr) {
-            if (adErr instanceof MetaApiError && adErr.isTokenInvalid) reconnectRequired = true
-            syncErrors.push(`Anúncios do conjunto ${as.id}: ${adErr instanceof Error ? adErr.message : 'erro desconhecido'}`)
-            console.warn(`[Sync] Aviso ao sincronizar anúncios do AdSet ${as.id}:`, adErr)
+            throw adErr
           }
         }
       } catch (adSetErr) {
-        if (adSetErr instanceof MetaApiError && adSetErr.isTokenInvalid) reconnectRequired = true
-        syncErrors.push(`Conjuntos da campanha ${c.id}: ${adSetErr instanceof Error ? adSetErr.message : 'erro desconhecido'}`)
-        console.warn(`[Sync] Aviso ao sincronizar AdSets da campanha ${c.id}:`, adSetErr)
+        throw adSetErr
       }
     }
 
@@ -373,6 +398,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
           totalInsights++
         }
       } catch (adSetErr) {
+        if (adSetErr instanceof MetaApiError && adSetErr.isRateLimit) throw adSetErr
         if (adSetErr instanceof MetaApiError && adSetErr.isTokenInvalid) reconnectRequired = true
         syncErrors.push(`Insights de conjuntos: ${adSetErr instanceof Error ? adSetErr.message : 'erro desconhecido'}`)
         console.warn(`[Sync] Aviso ao buscar insights de adsets da conta ${account.externalId}:`, adSetErr)
@@ -440,12 +466,14 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
           totalInsights++
         }
       } catch (adErr) {
+        if (adErr instanceof MetaApiError && adErr.isRateLimit) throw adErr
         if (adErr instanceof MetaApiError && adErr.isTokenInvalid) reconnectRequired = true
         syncErrors.push(`Insights de anúncios: ${adErr instanceof Error ? adErr.message : 'erro desconhecido'}`)
         console.warn(`[Sync] Aviso ao buscar insights de anúncios da conta ${account.externalId}:`, adErr)
       }
 
     } catch (insightErr) {
+      if (insightErr instanceof MetaApiError && insightErr.isRateLimit) throw insightErr
       if (insightErr instanceof MetaApiError && insightErr.isTokenInvalid) reconnectRequired = true
       syncErrors.push(`Insights de campanhas: ${insightErr instanceof Error ? insightErr.message : 'erro desconhecido'}`)
       console.warn(`[Sync] Aviso ao buscar insights da conta ${account.externalId}:`, insightErr)
@@ -489,9 +517,10 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       reconnectRequired
     }
   } catch (error: unknown) {
-    console.error('Meta sync error:', error)
+    const isRateLimit = error instanceof MetaApiError && error.isRateLimit
+    if (!isRateLimit) console.error('Meta sync error:', error)
     const isTokenInvalid = error instanceof MetaApiError && error.isTokenInvalid
-    const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido na sincronização'
+    const errorMsg = isRateLimit ? summarizeMetaSyncError(error.message)! : error instanceof Error ? error.message : 'Erro desconhecido na sincronização'
 
     if (isTokenInvalid) {
       await prisma.adAccount.update({
@@ -506,6 +535,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
         data: {
           status: 'failed',
           errorMessage: errorMsg,
+          details: JSON.stringify({ rateLimited: isRateLimit }),
           finishedAt: new Date()
         }
       }).catch(() => {})
@@ -518,7 +548,8 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       ads: 0,
       insights: 0,
       errors: [errorMsg],
-      reconnectRequired: isTokenInvalid
+      reconnectRequired: isTokenInvalid,
+      rateLimited: isRateLimit
     }
   }
 }

@@ -5,8 +5,8 @@ const BASE = 'https://graph.facebook.com/v21.0'
 export type MetaAction = { action_type: string; value: string }
 export type MetaAdAccount = { id: string; name: string; account_id?: string; currency?: string; timezone_name?: string; account_status?: number; amount_spent?: string; business_name?: string }
 export type MetaCampaign = { id: string; name: string; status?: string; objective?: string; buying_type?: string; daily_budget?: string; lifetime_budget?: string; start_time?: string; stop_time?: string }
-export type MetaAdSet = { id: string; name: string; status?: string; daily_budget?: string; lifetime_budget?: string; optimization_goal?: string; attribution_spec?: unknown; billing_event?: string; bid_amount?: string; start_time?: string; end_time?: string }
-export type MetaAd = { id: string; name: string; status?: string; creative?: { id?: string; image_url?: string; thumbnail_url?: string } }
+export type MetaAdSet = { id: string; campaign_id: string; name: string; status?: string; daily_budget?: string; lifetime_budget?: string; optimization_goal?: string; attribution_spec?: unknown; billing_event?: string; bid_amount?: string; start_time?: string; end_time?: string }
+export type MetaAd = { id: string; adset_id: string; name: string; status?: string; creative?: { id?: string; image_url?: string; thumbnail_url?: string } }
 export type MetaInsight = { campaign_id?: string; adset_id?: string; ad_id?: string; date_start: string; date_stop: string; spend?: string; impressions?: string; reach?: string; clicks?: string; unique_clicks?: string; ctr?: string; cpc?: string; cpm?: string; frequency?: string; actions?: MetaAction[]; action_values?: MetaAction[] }
 
 export class MetaApiError extends Error {
@@ -23,7 +23,7 @@ export class MetaApiError extends Error {
     // Meta Error 190 = Invalid OAuth 2.0 Access Token / Expired / Deauthorized
     this.isTokenInvalid = code === 190 || code === 102 || code === 10
     // Meta Error 17 = User request limit reached, 32 = Page request limit, 613 = Custom rate limit
-    this.isRateLimit = code === 17 || code === 32 || code === 613
+    this.isRateLimit = code === 4 || code === 17 || code === 32 || code === 613 || code === 80004 || /User request limit reached|rate.?limit/i.test(message)
   }
 }
 
@@ -47,7 +47,7 @@ export class MetaApiClient {
             errorData.error_subcode
           )
         }
-        throw new MetaApiError(`Falha HTTP na Meta Graph API (${err.response?.status || 'sem resposta'})`)
+        throw new MetaApiError(`Falha HTTP na Meta Graph API (${err.response?.status || 'sem resposta'})`, err.response?.status === 429 ? 17 : undefined)
       }
       throw err
     }
@@ -93,16 +93,18 @@ export class MetaApiClient {
     })
   }
   
-  async getAdSets(campaignId: string) {
-    return this.getAll<MetaAdSet>(`/${campaignId}/adsets`, {
-      fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,attribution_spec,billing_event,bid_amount,start_time,end_time,created_time,updated_time',
+  async getAccountAdSets(adAccountId: string) {
+    const accountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`
+    return this.getAll<MetaAdSet>(`/${accountId}/adsets`, {
+      fields: 'id,campaign_id,name,status,daily_budget,lifetime_budget,optimization_goal,attribution_spec,billing_event,bid_amount,start_time,end_time,created_time,updated_time',
       limit: '500',
     })
   }
   
-  async getAds(adSetId: string) {
-    return this.getAll<MetaAd>(`/${adSetId}/ads`, {
-      fields: 'id,name,status,creative{id,name,title,body,image_url,thumbnail_url},created_time,updated_time',
+  async getAccountAds(adAccountId: string) {
+    const accountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`
+    return this.getAll<MetaAd>(`/${accountId}/ads`, {
+      fields: 'id,adset_id,name,status,creative{id,name,title,body,image_url,thumbnail_url},created_time,updated_time',
       limit: '500',
     })
   }
@@ -149,7 +151,7 @@ export class MetaApiClient {
             errorData.error_subcode
           )
         }
-        throw new MetaApiError(`Falha HTTP na Meta Graph API (${err.response?.status || 'sem resposta'})`)
+        throw new MetaApiError(`Falha HTTP na Meta Graph API (${err.response?.status || 'sem resposta'})`, err.response?.status === 429 ? 17 : undefined)
       }
       throw err
     }
