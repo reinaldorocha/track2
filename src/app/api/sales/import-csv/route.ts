@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
+import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
 import { importGetfySalesCsv, previewGetfyCsv } from '@/lib/integrations/getfy-csv-importer'
 
@@ -54,7 +55,10 @@ export async function POST(req: Request) {
     }
 
     if (action === 'preview') {
-      const previewResult = previewGetfyCsv(csvContent, 5)
+      const fees = await prisma.fee.findMany({
+        where: { workspaceId, isActive: true }
+      })
+      const previewResult = previewGetfyCsv(csvContent, 5, fees)
       if (!previewResult.success) {
         return NextResponse.json({ error: previewResult.error || 'Erro ao processar pré-visualização do CSV' }, { status: 400 })
       }
@@ -77,3 +81,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
+

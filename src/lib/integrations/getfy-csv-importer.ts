@@ -6,6 +6,7 @@ import {
   upsertSale,
   InternalSale
 } from '@/lib/integrations/normalizer'
+import { calculateSaleFee, FeeRule } from '@/lib/calculations/financial-engine'
 
 export interface GetfyCsvRowParsed {
   date: Date
@@ -58,7 +59,7 @@ export interface GetfyImportOptions {
 export function parseCsvLines(csvText: string): string[][] {
   if (!csvText) return []
 
-  // Remove Byte Order Mark (BOM) UTF-8
+  // Remove Byte Order Mark (BOM) UTF-8 se presente
   const cleanText = csvText.replace(/^\uFEFF/, '')
 
   const result: string[][] = []
@@ -239,24 +240,27 @@ export function detectHeaderIndices(headerRow: string[]): {
       if (methodIdx === -1) methodIdx = idx
     } else if (h === 'moeda' || h === 'currency') {
       if (currencyIdx === -1) currencyIdx = idx
-    } else if (h.includes('liquido') || h.includes('net') || (h === 'valor' && netAmountIdx === -1)) {
+    } else if (h.includes('liquido') || h.includes('net')) {
       netAmountIdx = idx
-    } else if (h.includes('bruto') || h.includes('gross') || (h === 'total' && grossAmountIdx === -1)) {
+    } else if (h.includes('bruto') || h.includes('gross') || h.includes('total') || h === 'valor bruto') {
       grossAmountIdx = idx
+    } else if (h === 'valor') {
+      if (grossAmountIdx === -1) grossAmountIdx = idx
+      else if (netAmountIdx === -1) netAmountIdx = idx
     } else if (h === 'id' || h === 'codigo' || h.includes('transacao') || h.includes('order')) {
       orderIdIdx = idx
     }
   })
 
-  // Se valor líquido não foi explicitado, mas valor foi
-  if (netAmountIdx === -1 && grossAmountIdx !== -1) {
-    netAmountIdx = grossAmountIdx
-  } else if (grossAmountIdx === -1 && netAmountIdx !== -1) {
+  // Se valor bruto não foi explicitado, mas valor líquido foi, assume valor líquido como fallback
+  if (grossAmountIdx === -1 && netAmountIdx !== -1) {
     grossAmountIdx = netAmountIdx
+  } else if (netAmountIdx === -1 && grossAmountIdx !== -1) {
+    netAmountIdx = grossAmountIdx
   }
 
-  // Validação mínima: pelo menos data, status ou email, e valor líquido
-  const isValid = dateIdx !== -1 && (statusIdx !== -1 || emailIdx !== -1) && netAmountIdx !== -1
+  // Validação mínima: pelo menos data, status ou email, e valor (bruto ou líquido)
+  const isValid = dateIdx !== -1 && (statusIdx !== -1 || emailIdx !== -1) && (grossAmountIdx !== -1 || netAmountIdx !== -1)
 
   return {
     dateIdx,
@@ -276,7 +280,11 @@ export function detectHeaderIndices(headerRow: string[]): {
 /**
  * Função para pré-visualizar o CSV antes da gravação definitiva
  */
-export function previewGetfyCsv(csvText: string, maxRows = 5): {
+export function previewGetfyCsv(
+  csvText: string,
+  maxRows = 5,
+  fees: FeeRule[] = []
+): {
   success: boolean
   totalRows: number
   sample: Array<{
@@ -303,7 +311,7 @@ export function previewGetfyCsv(csvText: string, maxRows = 5): {
       success: false,
       totalRows: 0,
       sample: [],
-      error: 'Cabeçalho do CSV não reconhecido como Getfy. Verifique se o arquivo possui as colunas: Data, Produto, Cliente, E-mail, Status, Método, Valor líquido.'
+      error: 'Cabeçalho do CSV não reconhecido como Getfy. Verifique se o arquivo possui as colunas: Data, Produto, Cliente, E-mail, Status, Método e Valor bruto/líquido.'
     }
   }
 
@@ -321,8 +329,27 @@ export function previewGetfyCsv(csvText: string, maxRows = 5): {
     const rawStatus = indices.statusIdx !== -1 ? row[indices.statusIdx] || '' : 'Pago'
     const rawMethod = indices.methodIdx !== -1 ? row[indices.methodIdx] || '' : 'PIX'
     const currency = indices.currencyIdx !== -1 ? (row[indices.currencyIdx] || 'BRL').trim().toUpperCase() : 'BRL'
-    const netAmount = parseMoneyValue(indices.netAmountIdx !== -1 ? row[indices.netAmountIdx] : 0)
-    const grossAmount = indices.grossAmountIdx !== -1 ? parseMoneyValue(row[indices.grossAmountIdx]) : netAmount
+    
+    // Pega o valor bruto (prioritário da coluna Valor bruto)
+    const grossAmount = indices.grossAmountIdx !== -1
+      ? parseMoneyValue(row[indices.grossAmountIdx])
+      : parseMoneyValue(indices.netAmountIdx !== -1 ? row[indices.netAmountIdx] : 0)
+
+    // O líquido é o sistema que calcula
+    let netAmount = grossAmount
+    const normalizedMethod = normalizeSalePaymentMethod({ paymentMethod: rawMethod }, 'getfy')
+    if (fees && fees.length > 0) {
+      const fee = calculateSaleFee(
+        { grossAmount, platform: 'getfy', paymentMethod: normalizedMethod, installments: 1 },
+        fees
+      )
+      netAmount = Math.max(0, Math.round((grossAmount - fee) * 100) / 100)
+    } else if (indices.netAmountIdx !== -1 && row[indices.netAmountIdx]) {
+      const csvNet = parseMoneyValue(row[indices.netAmountIdx])
+      if (csvNet > 0 && csvNet <= grossAmount) {
+        netAmount = csvNet
+      }
+    }
 
     sample.push({
       date: rawDate,
@@ -402,10 +429,15 @@ export async function importGetfySalesCsv(
         maxDate: null,
         uniqueProducts: []
       },
-      errors: ['Formato de colunas inválido. As colunas esperadas incluem Data, Produto, Cliente, E-mail, Status, Método e Valor líquido.'],
-      error: 'Formato de colunas inválido. As colunas esperadas incluem Data, Produto, Cliente, E-mail, Status, Método e Valor líquido.'
+      errors: ['Formato de colunas inválido. As colunas esperadas incluem Data, Produto, Cliente, E-mail, Status, Método e Valor bruto/líquido.'],
+      error: 'Formato de colunas inválido. As colunas esperadas incluem Data, Produto, Cliente, E-mail, Status, Método e Valor bruto/líquido.'
     }
   }
+
+  // Buscar taxas configuradas no workspace para o sistema calcular o valor líquido
+  const fees = await prisma.fee.findMany({
+    where: { workspaceId, isActive: true }
+  })
 
   const dataRows = lines.slice(1)
   let createdCount = 0
@@ -454,10 +486,11 @@ export async function importGetfySalesCsv(
       const currency = indices.currencyIdx !== -1
         ? (row[indices.currencyIdx] || 'BRL').replace(/^"|"$/g, '').trim().toUpperCase()
         : 'BRL'
-      const netAmount = parseMoneyValue(indices.netAmountIdx !== -1 ? row[indices.netAmountIdx] : 0)
+
+      // Pega do valor bruto (da nova coluna Valor bruto adicionada)
       const grossAmount = indices.grossAmountIdx !== -1
         ? parseMoneyValue(row[indices.grossAmountIdx])
-        : netAmount
+        : parseMoneyValue(indices.netAmountIdx !== -1 ? row[indices.netAmountIdx] : 0)
 
       const parsedDateTime = parseBrazilianDateTime(rawDate)
       const orderedAt = parsedDateTime.date
@@ -472,6 +505,22 @@ export async function importGetfySalesCsv(
       // Normalizar status e método
       const normalizedStatus = normalizeSaleStatus(rawStatus, 'getfy')
       const normalizedMethod = normalizeSalePaymentMethod({ paymentMethod: rawMethod }, 'getfy')
+
+      // O líquido é o sistema que calcula a partir do valor bruto
+      let netAmount = grossAmount
+      if (fees.length > 0) {
+        const fee = calculateSaleFee(
+          { grossAmount, platform: 'getfy', paymentMethod: normalizedMethod, installments: 1 },
+          fees
+        )
+        netAmount = Math.max(0, Math.round((grossAmount - fee) * 100) / 100)
+      } else if (indices.netAmountIdx !== -1 && row[indices.netAmountIdx]) {
+        // Se ainda não foram cadastradas regras de taxas no sistema, usa o valor líquido reportado pelo CSV
+        const csvNet = parseMoneyValue(row[indices.netAmountIdx])
+        if (csvNet > 0 && csvNet <= grossAmount) {
+          netAmount = csvNet
+        }
+      }
 
       // Determinar externalId único e determinístico
       let externalId = ''
@@ -512,7 +561,7 @@ export async function importGetfySalesCsv(
         paymentMethod: normalizedMethod,
         installments: 1,
         status: normalizedStatus,
-        grossAmount: grossAmount > 0 ? grossAmount : netAmount,
+        grossAmount,
         netAmount,
         currency,
         customerEmail: email || undefined,
@@ -537,7 +586,7 @@ export async function importGetfySalesCsv(
       // Acumular estatísticas
       if (normalizedStatus === 'approved') {
         countApproved++
-        totalGross += (grossAmount > 0 ? grossAmount : netAmount)
+        totalGross += grossAmount
         totalNet += netAmount
       } else if (normalizedStatus === 'pending') {
         countPending++
@@ -585,3 +634,4 @@ export async function importGetfySalesCsv(
     errors
   }
 }
+

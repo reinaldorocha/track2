@@ -354,7 +354,8 @@ export function ImportSalesModal({ isOpen, onClose, onSuccess }: ImportSalesModa
                             <th className="p-2 font-medium">Cliente</th>
                             <th className="p-2 font-medium">Status</th>
                             <th className="p-2 font-medium">Método</th>
-                            <th className="p-2 font-medium text-right">Valor Líq.</th>
+                            <th className="p-2 font-medium text-right">Valor Bruto</th>
+                            <th className="p-2 font-medium text-right">Valor Líquido</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60">
@@ -385,7 +386,10 @@ export function ImportSalesModal({ isOpen, onClose, onSuccess }: ImportSalesModa
                               <td className="p-2 font-medium text-gray-600 dark:text-gray-300">
                                 {row.paymentMethod}
                               </td>
-                              <td className="p-2 text-right font-bold text-gray-900 dark:text-white">
+                              <td className="p-2 text-right font-medium text-gray-900 dark:text-white">
+                                {formatCurrency(row.grossAmount, row.currency)}
+                              </td>
+                              <td className="p-2 text-right font-bold text-emerald-600 dark:text-emerald-400">
                                 {formatCurrency(row.netAmount, row.currency)}
                               </td>
                             </tr>
