@@ -1,6 +1,13 @@
-import axios, { AxiosError } from 'axios'
+import axios from 'axios'
 
 const BASE = 'https://graph.facebook.com/v21.0'
+
+export type MetaAction = { action_type: string; value: string }
+export type MetaAdAccount = { id: string; name: string; account_id?: string; currency?: string; timezone_name?: string; account_status?: number; amount_spent?: string; business_name?: string }
+export type MetaCampaign = { id: string; name: string; status?: string; objective?: string; buying_type?: string; daily_budget?: string; lifetime_budget?: string; start_time?: string; stop_time?: string }
+export type MetaAdSet = { id: string; name: string; status?: string; daily_budget?: string; lifetime_budget?: string; optimization_goal?: string; attribution_spec?: unknown; billing_event?: string; bid_amount?: string; start_time?: string; end_time?: string }
+export type MetaAd = { id: string; name: string; status?: string; creative?: { id?: string; image_url?: string; thumbnail_url?: string } }
+export type MetaInsight = { campaign_id?: string; adset_id?: string; ad_id?: string; date_start: string; date_stop: string; spend?: string; impressions?: string; reach?: string; clicks?: string; unique_clicks?: string; ctr?: string; cpc?: string; cpm?: string; frequency?: string; actions?: MetaAction[]; action_values?: MetaAction[] }
 
 export class MetaApiError extends Error {
   public code?: number
@@ -40,9 +47,29 @@ export class MetaApiClient {
             errorData.error_subcode
           )
         }
+        throw new MetaApiError(`Falha HTTP na Meta Graph API (${err.response?.status || 'sem resposta'})`)
       }
       throw err
     }
+  }
+
+  private async getAll<T>(path: string, params: Record<string, string>): Promise<T[]> {
+    const rows: T[] = []
+    let after: string | undefined
+    const seen = new Set<string>()
+    do {
+      const page = await this.get<{ data?: T[]; paging?: { cursors?: { after?: string }; next?: string } }>(path, {
+        ...params,
+        ...(after ? { after } : {}),
+      })
+      rows.push(...(page.data || []))
+      if (page.paging?.next && !page.paging.cursors?.after) throw new Error('Meta retornou próxima página sem cursor')
+      const next = page.paging?.next ? page.paging?.cursors?.after : undefined
+      if (next && seen.has(next)) throw new Error('Paginação da Meta repetiu o cursor')
+      if (next) seen.add(next)
+      after = next
+    } while (after)
+    return rows
   }
   
   async getMe() { 
@@ -52,36 +79,32 @@ export class MetaApiClient {
   }
   
   async getAdAccounts() {
-    const data = await this.get<{ data: any[] }>('/me/adaccounts', {
+    return this.getAll<MetaAdAccount>('/me/adaccounts', {
       fields: 'id,name,account_id,currency,timezone_name,account_status,amount_spent,business_name',
       limit: '100',
     })
-    return data.data || []
   }
   
   async getCampaigns(adAccountId: string) {
     const accountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`
-    const data = await this.get<{ data: any[] }>(`/${accountId}/campaigns`, {
+    return this.getAll<MetaCampaign>(`/${accountId}/campaigns`, {
       fields: 'id,name,status,objective,buying_type,daily_budget,lifetime_budget,start_time,stop_time,created_time,updated_time',
       limit: '500',
     })
-    return data.data || []
   }
   
   async getAdSets(campaignId: string) {
-    const data = await this.get<{ data: any[] }>(`/${campaignId}/adsets`, {
-      fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,billing_event,bid_amount,start_time,end_time,created_time,updated_time',
+    return this.getAll<MetaAdSet>(`/${campaignId}/adsets`, {
+      fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,attribution_spec,billing_event,bid_amount,start_time,end_time,created_time,updated_time',
       limit: '500',
     })
-    return data.data || []
   }
   
   async getAds(adSetId: string) {
-    const data = await this.get<{ data: any[] }>(`/${adSetId}/ads`, {
+    return this.getAll<MetaAd>(`/${adSetId}/ads`, {
       fields: 'id,name,status,creative{id,name,title,body,image_url,thumbnail_url},created_time,updated_time',
       limit: '500',
     })
-    return data.data || []
   }
   
   async getInsights(
@@ -97,6 +120,7 @@ export class MetaApiClient {
       level,
       time_increment: '1',
       limit: '500',
+      use_unified_attribution_setting: 'true',
     }
 
     if (since && until) { 
@@ -105,11 +129,10 @@ export class MetaApiClient {
       params.date_preset = datePreset 
     }
     
-    const data = await this.get<{ data: any[] }>(`/${accountId}/insights`, params)
-    return data.data || []
+    return this.getAll<MetaInsight>(`/${accountId}/insights`, params)
   }
 
-  async post<T>(path: string, data: Record<string, any> = {}, params: Record<string, string> = {}): Promise<T> {
+  async post<T>(path: string, data: Record<string, unknown> = {}, params: Record<string, string> = {}): Promise<T> {
     try {
       const response = await axios.post(`${BASE}${path}`, data, {
         params: { ...params, access_token: this.accessToken },
@@ -126,6 +149,7 @@ export class MetaApiClient {
             errorData.error_subcode
           )
         }
+        throw new MetaApiError(`Falha HTTP na Meta Graph API (${err.response?.status || 'sem resposta'})`)
       }
       throw err
     }

@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db'
 import { decrypt } from '@/lib/encryption'
-import { MetaApiClient, MetaApiError } from './client'
+import { MetaApiClient, MetaApiError, type MetaAction } from './client'
 
 export interface SyncResult {
   success: boolean
@@ -11,10 +11,9 @@ export interface SyncResult {
   errors: string[]
   reconnectRequired?: boolean
 }
-
 export function parseConversions(
-  actions: any[] | undefined | null,
-  actionValues?: any[] | undefined | null
+  actions: MetaAction[] | undefined | null,
+  actionValues?: MetaAction[] | undefined | null
 ): { conversions: number; conversionValue: number } {
   let conversions = 0
   let conversionValue = 0
@@ -24,12 +23,12 @@ export function parseConversions(
     // IMPORTANTE: Nunca somar tipos de compra diferentes! A Meta retorna 'offsite_conversion.fb_pixel_purchase',
     // 'purchase', 'omni_purchase' e 'onsite_web_purchase' para a MESMA conversão (duplicando de 4x a 7x).
     const purchaseAction =
-      actions.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase') ||
-      actions.find((a: any) => a.action_type === 'purchase') ||
-      actions.find((a: any) => a.action_type === 'omni_purchase') ||
-      actions.find((a: any) => a.action_type === 'onsite_web_purchase') ||
-      actions.find((a: any) => typeof a.action_type === 'string' && a.action_type.endsWith('_purchase')) ||
-      actions.find((a: any) => typeof a.action_type === 'string' && a.action_type.includes('purchase'))
+      actions.find((a) => a.action_type === 'offsite_conversion.fb_pixel_purchase') ||
+      actions.find((a) => a.action_type === 'purchase') ||
+      actions.find((a) => a.action_type === 'omni_purchase') ||
+      actions.find((a) => a.action_type === 'onsite_web_purchase') ||
+      actions.find((a) => a.action_type.endsWith('_purchase')) ||
+      actions.find((a) => a.action_type.includes('purchase'))
 
     if (purchaseAction) {
       conversions = parseInt(purchaseAction.value, 10) || 0
@@ -38,12 +37,12 @@ export function parseConversions(
 
   if (Array.isArray(actionValues)) {
     const valueAction =
-      actionValues.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase') ||
-      actionValues.find((a: any) => a.action_type === 'purchase') ||
-      actionValues.find((a: any) => a.action_type === 'omni_purchase') ||
-      actionValues.find((a: any) => a.action_type === 'onsite_web_purchase') ||
-      actionValues.find((a: any) => typeof a.action_type === 'string' && a.action_type.endsWith('_purchase')) ||
-      actionValues.find((a: any) => typeof a.action_type === 'string' && a.action_type.includes('purchase'))
+      actionValues.find((a) => a.action_type === 'offsite_conversion.fb_pixel_purchase') ||
+      actionValues.find((a) => a.action_type === 'purchase') ||
+      actionValues.find((a) => a.action_type === 'omni_purchase') ||
+      actionValues.find((a) => a.action_type === 'onsite_web_purchase') ||
+      actionValues.find((a) => a.action_type.endsWith('_purchase')) ||
+      actionValues.find((a) => a.action_type.includes('purchase'))
 
     if (valueAction) {
       conversionValue = parseFloat(valueAction.value) || 0
@@ -96,6 +95,19 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
     let totalAdSets = 0
     let totalAds = 0
     let totalInsights = 0
+    const syncErrors: string[] = []
+    let reconnectRequired = false
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: account.timezone,
+      year: 'numeric', month: '2-digit', day: '2-digit'
+    })
+    const todayStr = formatter.format(new Date())
+    const lastFullSync = await prisma.syncLog.findFirst({
+      where: { workspaceId, adAccountId: account.id, type: 'meta_ads', status: 'success', startedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, details: { contains: '"history":true' } },
+      orderBy: { startedAt: 'desc' }
+    })
+    const history = !lastFullSync
+    const sinceStr = formatter.format(new Date(Date.now() - (history ? 95 : 7) * 86400000))
 
     const campaignDbMap = new Map<string, string>() // externalId -> dbId
     const adSetDbMap = new Map<string, string>() // externalId -> dbId
@@ -157,6 +169,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
               dailyBudget: as.daily_budget ? parseFloat(as.daily_budget) / 100 : null,
               lifetimeBudget: as.lifetime_budget ? parseFloat(as.lifetime_budget) / 100 : null,
               optimizationGoal: as.optimization_goal || null,
+              attributionSpec: as.attribution_spec ? JSON.stringify(as.attribution_spec) : null,
               billingEvent: as.billing_event || null,
               bidAmount: as.bid_amount ? parseFloat(as.bid_amount) / 100 : null,
               startTime: as.start_time ? new Date(as.start_time) : null,
@@ -172,6 +185,7 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
               dailyBudget: as.daily_budget ? parseFloat(as.daily_budget) / 100 : null,
               lifetimeBudget: as.lifetime_budget ? parseFloat(as.lifetime_budget) / 100 : null,
               optimizationGoal: as.optimization_goal || null,
+              attributionSpec: as.attribution_spec ? JSON.stringify(as.attribution_spec) : null,
               billingEvent: as.billing_event || null,
               bidAmount: as.bid_amount ? parseFloat(as.bid_amount) / 100 : null,
               startTime: as.start_time ? new Date(as.start_time) : null,
@@ -217,44 +231,39 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
               adDbMap.set(ad.id, dbAd.id)
             }
           } catch (adErr) {
+            if (adErr instanceof MetaApiError && adErr.isTokenInvalid) reconnectRequired = true
+            syncErrors.push(`Anúncios do conjunto ${as.id}: ${adErr instanceof Error ? adErr.message : 'erro desconhecido'}`)
             console.warn(`[Sync] Aviso ao sincronizar anúncios do AdSet ${as.id}:`, adErr)
           }
         }
       } catch (adSetErr) {
+        if (adSetErr instanceof MetaApiError && adSetErr.isTokenInvalid) reconnectRequired = true
+        syncErrors.push(`Conjuntos da campanha ${c.id}: ${adSetErr instanceof Error ? adSetErr.message : 'erro desconhecido'}`)
         console.warn(`[Sync] Aviso ao sincronizar AdSets da campanha ${c.id}:`, adSetErr)
       }
     }
 
     // 4. Sincronizar Métricas e Insights Reais (Últimos 37 dias incluindo HOJE na timezone de Brasília)
     try {
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Sao_Paulo',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      })
-      const todayStr = formatter.format(new Date()) // YYYY-MM-DD
-      const sinceDate = new Date(Date.now() - 37 * 86400000)
-      const sinceStr = formatter.format(sinceDate) // YYYY-MM-DD
 
       // 4.1 Insights de Campanhas
       const insights = await client.getInsights(account.externalId, 'campaign', undefined, sinceStr, todayStr)
       
       for (const ins of insights) {
-        const campaignDbId = campaignDbMap.get(ins.campaign_id)
+        const campaignDbId = campaignDbMap.get(ins.campaign_id || '')
         if (!campaignDbId) continue
 
         const dateStart = new Date(ins.date_start)
         const dateStop = new Date(ins.date_stop)
-        const spend = parseFloat(ins.spend) || 0
-        const impressions = parseInt(ins.impressions, 10) || 0
-        const reach = parseInt(ins.reach, 10) || 0
-        const clicks = parseInt(ins.clicks, 10) || 0
-        const uniqueClicks = parseInt(ins.unique_clicks, 10) || clicks
-        const ctr = parseFloat(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
-        const cpc = parseFloat(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
-        const cpm = parseFloat(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
-        const frequency = parseFloat(ins.frequency) || (reach > 0 ? impressions / reach : 1)
+        const spend = Number(ins.spend) || 0
+        const impressions = Number(ins.impressions) || 0
+        const reach = Number(ins.reach) || 0
+        const clicks = Number(ins.clicks) || 0
+        const uniqueClicks = Number(ins.unique_clicks) || 0
+        const ctr = Number(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
+        const cpc = Number(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
+        const cpm = Number(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
+        const frequency = Number(ins.frequency) || (reach > 0 ? impressions / reach : 0)
 
         const { conversions, conversionValue } = parseConversions(ins.actions, ins.action_values)
 
@@ -306,19 +315,19 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       try {
         const adSetInsights = await client.getInsights(account.externalId, 'adset', undefined, sinceStr, todayStr)
         for (const ins of adSetInsights) {
-          const adSetDbId = adSetDbMap.get(ins.adset_id)
+          const adSetDbId = adSetDbMap.get(ins.adset_id || '')
           if (!adSetDbId) continue
 
           const dateStart = new Date(ins.date_start)
           const dateStop = new Date(ins.date_stop)
-          const spend = parseFloat(ins.spend) || 0
-          const impressions = parseInt(ins.impressions, 10) || 0
-          const reach = parseInt(ins.reach, 10) || 0
-          const clicks = parseInt(ins.clicks, 10) || 0
-          const ctr = parseFloat(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
-          const cpc = parseFloat(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
-          const cpm = parseFloat(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
-          const frequency = parseFloat(ins.frequency) || (reach > 0 ? impressions / reach : 1)
+          const spend = Number(ins.spend) || 0
+          const impressions = Number(ins.impressions) || 0
+          const reach = Number(ins.reach) || 0
+          const clicks = Number(ins.clicks) || 0
+          const ctr = Number(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
+          const cpc = Number(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
+          const cpm = Number(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
+          const frequency = Number(ins.frequency) || (reach > 0 ? impressions / reach : 0)
 
           const { conversions, conversionValue } = parseConversions(ins.actions, ins.action_values)
 
@@ -364,6 +373,8 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
           totalInsights++
         }
       } catch (adSetErr) {
+        if (adSetErr instanceof MetaApiError && adSetErr.isTokenInvalid) reconnectRequired = true
+        syncErrors.push(`Insights de conjuntos: ${adSetErr instanceof Error ? adSetErr.message : 'erro desconhecido'}`)
         console.warn(`[Sync] Aviso ao buscar insights de adsets da conta ${account.externalId}:`, adSetErr)
       }
 
@@ -371,19 +382,19 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       try {
         const adInsights = await client.getInsights(account.externalId, 'ad', undefined, sinceStr, todayStr)
         for (const ins of adInsights) {
-          const adDbId = adDbMap.get(ins.ad_id)
+          const adDbId = adDbMap.get(ins.ad_id || '')
           if (!adDbId) continue
 
           const dateStart = new Date(ins.date_start)
           const dateStop = new Date(ins.date_stop)
-          const spend = parseFloat(ins.spend) || 0
-          const impressions = parseInt(ins.impressions, 10) || 0
-          const reach = parseInt(ins.reach, 10) || 0
-          const clicks = parseInt(ins.clicks, 10) || 0
-          const ctr = parseFloat(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
-          const cpc = parseFloat(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
-          const cpm = parseFloat(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
-          const frequency = parseFloat(ins.frequency) || (reach > 0 ? impressions / reach : 1)
+          const spend = Number(ins.spend) || 0
+          const impressions = Number(ins.impressions) || 0
+          const reach = Number(ins.reach) || 0
+          const clicks = Number(ins.clicks) || 0
+          const ctr = Number(ins.ctr) || (impressions > 0 ? (clicks / impressions) * 100 : 0)
+          const cpc = Number(ins.cpc) || (clicks > 0 ? spend / clicks : 0)
+          const cpm = Number(ins.cpm) || (impressions > 0 ? (spend / impressions) * 1000 : 0)
+          const frequency = Number(ins.frequency) || (reach > 0 ? impressions / reach : 0)
 
           const { conversions, conversionValue } = parseConversions(ins.actions, ins.action_values)
 
@@ -429,10 +440,14 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
           totalInsights++
         }
       } catch (adErr) {
+        if (adErr instanceof MetaApiError && adErr.isTokenInvalid) reconnectRequired = true
+        syncErrors.push(`Insights de anúncios: ${adErr instanceof Error ? adErr.message : 'erro desconhecido'}`)
         console.warn(`[Sync] Aviso ao buscar insights de anúncios da conta ${account.externalId}:`, adErr)
       }
 
     } catch (insightErr) {
+      if (insightErr instanceof MetaApiError && insightErr.isTokenInvalid) reconnectRequired = true
+      syncErrors.push(`Insights de campanhas: ${insightErr instanceof Error ? insightErr.message : 'erro desconhecido'}`)
       console.warn(`[Sync] Aviso ao buscar insights da conta ${account.externalId}:`, insightErr)
     }
 
@@ -440,8 +455,8 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
     await prisma.adAccount.update({
       where: { id: account.id },
       data: { 
-        lastSyncAt: new Date(),
-        status: 'active'
+        ...(syncErrors.length === 0 ? { lastSyncAt: new Date() } : {}),
+        status: reconnectRequired ? 'reconnect_required' : 'active'
       }
     })
 
@@ -449,8 +464,15 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       await prisma.syncLog.update({
         where: { id: syncLogId },
         data: {
-          status: 'success',
+          status: syncErrors.length ? 'partial' : 'success',
           finishedAt: new Date(),
+          errorMessage: syncErrors.length ? syncErrors.join('; ') : null,
+          details: JSON.stringify({ since: sinceStr, until: todayStr, timezone: account.timezone, history,
+            levels: {
+              campaign: { success: !syncErrors.some(e => e.startsWith('Insights de campanhas')), errors: syncErrors.filter(e => e.startsWith('Insights de campanhas')) },
+              adset: { success: !syncErrors.some(e => e.startsWith('Conjuntos') || e.startsWith('Insights de conjuntos')), errors: syncErrors.filter(e => e.startsWith('Conjuntos') || e.startsWith('Insights de conjuntos')) },
+              ad: { success: !syncErrors.some(e => e.startsWith('Anúncios') || e.startsWith('Insights de anúncios')), errors: syncErrors.filter(e => e.startsWith('Anúncios') || e.startsWith('Insights de anúncios')) },
+            }, errors: syncErrors }),
           itemsTotal: campaigns.length + totalAdSets + totalAds + totalInsights,
           itemsProcessed: campaigns.length + totalAdSets + totalAds + totalInsights
         }
@@ -458,12 +480,13 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
     }
 
     return {
-      success: true,
+      success: syncErrors.length === 0,
       campaigns: campaigns.length,
       adSets: totalAdSets,
       ads: totalAds,
       insights: totalInsights,
-      errors: []
+      errors: syncErrors,
+      reconnectRequired
     }
   } catch (error: unknown) {
     console.error('Meta sync error:', error)
@@ -497,45 +520,6 @@ export async function syncAdAccount(workspaceId: string, adAccountDbId: string):
       errors: [errorMsg],
       reconnectRequired: isTokenInvalid
     }
-  }
-}
-
-export async function syncInsightsOnly(
-  workspaceId: string,
-  adAccountDbId: string,
-  since?: string,
-  until?: string
-) {
-  try {
-    const account = await prisma.adAccount.findFirst({
-      where: { id: adAccountDbId, workspaceId }
-    })
-    if (!account || !account.accessTokenEnc) {
-      return { success: false, error: 'Conta ou token não encontrado' }
-    }
-    
-    const token = decrypt(account.accessTokenEnc)
-    const client = new MetaApiClient(token)
-
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Sao_Paulo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    })
-    const todayStr = formatter.format(new Date())
-    const sinceDate = new Date(Date.now() - 37 * 86400000)
-    const sinceStr = formatter.format(sinceDate)
-
-    const effectiveSince = since || sinceStr
-    const effectiveUntil = until || todayStr
-
-    const insights = await client.getInsights(account.externalId, 'campaign', undefined, effectiveSince, effectiveUntil)
-
-    return { success: true, count: insights.length }
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'Erro ao sincronizar insights'
-    return { success: false, error: msg }
   }
 }
 

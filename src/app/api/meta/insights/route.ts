@@ -2,491 +2,97 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
-import { calcCPC, calcCPM, calcCTR, calcCPA, calcROAS, calcROI, calcMargin, calcCPI } from '@/lib/metrics'
+import { resolveRange, nextDay, midnight, measure, assignSales, hasCompleteCoverage, type MetaInsight } from '@/lib/meta/insight-helpers'
 
-type MetaRecommendation =
-  | 'scale'
-  | 'profitable'
-  | 'breakeven'
-  | 'pause'
-  | 'learning'
-  | 'inactive'
-
-function parseNormalizedDateRange(fromStr: string | null, toStr: string | null): { from: Date; to: Date } {
-  const tz = 'America/Sao_Paulo'
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  })
-
-  let fromDate: Date
-  let toDate: Date
-
-  if (fromStr) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(fromStr)) {
-      const [y, m, d] = fromStr.split('-').map(Number)
-      fromDate = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0))
-    } else {
-      const parsed = new Date(fromStr)
-      if (!isNaN(parsed.getTime())) {
-        const parts = formatter.format(parsed) // YYYY-MM-DD
-        const [y, m, d] = parts.split('-').map(Number)
-        fromDate = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0))
-      } else {
-        const d = new Date(Date.now() - 30 * 86400000)
-        fromDate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0))
-      }
-    }
-  } else {
-    const d = new Date(Date.now() - 30 * 86400000)
-    fromDate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0))
-  }
-
-  if (toStr) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(toStr)) {
-      const [y, m, d] = toStr.split('-').map(Number)
-      toDate = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999))
-    } else {
-      const parsed = new Date(toStr)
-      if (!isNaN(parsed.getTime())) {
-        const parts = formatter.format(parsed) // YYYY-MM-DD
-        const [y, m, d] = parts.split('-').map(Number)
-        toDate = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999))
-      } else {
-        const now = new Date()
-        toDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999))
-      }
-    }
-  } else {
-    const now = new Date()
-    toDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999))
-  }
-
-  return { from: fromDate, to: toDate }
-}
-
-function getCanonicalMetrics(insights: Array<{
-  spend: number
-  impressions: number
-  clicks: number
-  conversions: number
-  conversionValue: number
-  actions?: string | null
-}>) {
-  let spend = 0
-  let impressions = 0
-  let clicks = 0
-  let conversions = 0
-  let metaRevenue = 0
-  let icCount = 0
-  let foundIc = false
-
-  for (const i of insights) {
-    spend += i.spend || 0
-    impressions += i.impressions || 0
-    clicks += i.clicks || 0
-
-    let rowConversions = i.conversions || 0
-    let rowRevenue = i.conversionValue || 0
-
-    if (i.actions) {
-      try {
-        const actionsArr = JSON.parse(i.actions)
-        if (Array.isArray(actionsArr)) {
-          // Extrair compra canônica (sem duplicar entre pixel, omni e web)
-          const purchaseAction =
-            actionsArr.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_purchase') ||
-            actionsArr.find((a: any) => a.action_type === 'purchase') ||
-            actionsArr.find((a: any) => a.action_type === 'omni_purchase') ||
-            actionsArr.find((a: any) => a.action_type === 'onsite_web_purchase') ||
-            actionsArr.find((a: any) => typeof a.action_type === 'string' && a.action_type.endsWith('_purchase')) ||
-            actionsArr.find((a: any) => typeof a.action_type === 'string' && a.action_type.includes('purchase'))
-
-          if (purchaseAction) {
-            rowConversions = parseInt(purchaseAction.value, 10) || 0
-          }
-
-          // Extrair InitiateCheckout real
-          const icAction =
-            actionsArr.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_initiate_checkout') ||
-            actionsArr.find((a: any) => a.action_type === 'initiate_checkout') ||
-            actionsArr.find((a: any) => a.action_type === 'omni_initiated_checkout') ||
-            actionsArr.find((a: any) => typeof a.action_type === 'string' && a.action_type.includes('initiate_checkout'))
-
-          if (icAction) {
-            icCount += parseInt(icAction.value, 10) || 0
-            foundIc = true
-          }
-        }
-      } catch {}
-    }
-
-    conversions += rowConversions
-    metaRevenue += rowRevenue
-  }
-
-  if (!foundIc) {
-    icCount = Math.round(conversions * 1.5)
-  }
-
-  return { spend, impressions, clicks, conversions, metaRevenue, icCount }
-}
-
-function computeRecommendation(
-  spend: number,
-  sales: number,
-  profit: number,
-  roas: number | null,
-  status: string
-): MetaRecommendation {
-  if (spend <= 0) {
-    return 'inactive'
-  }
-  if (status?.toUpperCase() !== 'ACTIVE') {
-    return profit > 0 ? 'profitable' : 'pause'
-  }
-  if (sales >= 3 && roas !== null && roas >= 2.0 && profit > 0) {
-    return 'scale'
-  }
-  if (profit > 0 || (roas !== null && roas >= 1.2)) {
-    return 'profitable'
-  }
-  if (sales > 0 && roas !== null && roas >= 0.8) {
-    return 'breakeven'
-  }
-  if (sales === 0 && spend < 50) {
-    return 'learning'
-  }
-  return 'pause'
-}
-
-function normalizeForMatch(str: string | null | undefined): string {
-  if (!str) return ''
-  return str.toLowerCase().trim().replace(/[-_\s]+/g, '')
-}
+type Row = { id: string; externalId: string; name: string; status: string; budget: number | null; accountId: string; accountName: string; currency: string; campaignId?: string; adSetId?: string; parentName?: string; campaignName?: string; previewUrl?: string | null; insights: MetaInsight[] }
 
 export async function GET(req: Request) {
   try {
     const session = await auth()
     if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
     const workspaceId = await getUserWorkspaceId(session.user.id)
     if (!workspaceId) return NextResponse.json({ error: 'No workspace' }, { status: 404 })
-
-    const { searchParams } = new URL(req.url)
-    const level = searchParams.get('level') || 'campaign'
-    const adAccountId = searchParams.get('adAccountId')
-    const statusFilter = searchParams.get('status')
-    const search = searchParams.get('search')
-    const fromStr = searchParams.get('from')
-    const toStr = searchParams.get('to')
-
-    const { from, to } = parseNormalizedDateRange(fromStr, toStr)
-
-    // Buscar vendas reais aprovadas no período (estilo UTMfy)
-    const sales = await prisma.sale.findMany({
-      where: {
-        workspaceId,
-        status: 'approved',
-        orderedAt: { gte: from, lte: to }
-      },
-      select: {
-        id: true,
-        utmCampaign: true,
-        utmContent: true,
-        grossAmount: true,
-        netAmount: true,
-        attributionRecord: {
-          select: {
-            campaignId: true,
-            adSetId: true,
-            adId: true,
-            utmCampaign: true
-          }
-        }
-      }
-    })
-
-    if (level === 'adset') {
-      const whereClause: any = { workspaceId }
-      if (adAccountId && adAccountId !== 'all') {
-        whereClause.campaign = { adAccountId }
-      }
-      if (search) {
-        whereClause.name = { contains: search, mode: 'insensitive' }
-      }
-
-      const adSets = await prisma.adSet.findMany({
-        where: whereClause,
-        include: {
-          insights: {
-            where: { dateStart: { gte: from, lte: to } }
-          },
-          campaign: { select: { name: true, adAccountId: true } }
-        }
-      })
-
-      const data = adSets.map(as => {
-        const { spend, impressions, clicks, conversions, metaRevenue, icCount } = getCanonicalMetrics(as.insights)
-
-        // Matching de vendas reais do gateway/banco
-        const matchedSales = sales.filter(s => {
-          if (s.attributionRecord?.adSetId && (s.attributionRecord.adSetId === as.id || s.attributionRecord.adSetId === as.externalId)) {
-            return true
-          }
-          const utm = s.utmCampaign || s.attributionRecord?.utmCampaign
-          if (!utm) return false
-          const nUtm = normalizeForMatch(utm)
-          const nName = normalizeForMatch(as.name)
-          const nExt = normalizeForMatch(as.externalId)
-          return nUtm === nName || nUtm === nExt || nName.includes(nUtm) || nUtm.includes(nName)
-        })
-
-        const realSalesCount = matchedSales.length
-        const realGrossRevenue = matchedSales.reduce((acc, s) => acc + (s.grossAmount || 0), 0)
-        const realNetRevenue = matchedSales.reduce((acc, s) => acc + (s.netAmount || 0), 0)
-
-        const displaySales = conversions > 0 ? conversions : realSalesCount
-        const revenue = realGrossRevenue > 0 ? realGrossRevenue : metaRevenue
-        const netRevenue = realNetRevenue > 0 ? realNetRevenue : (revenue * 0.9)
-        const profit = netRevenue - spend
-        const roas = calcROAS(revenue, spend)
-        const roi = calcROI(profit, spend)
-        const margin = calcMargin(profit, revenue)
-        const cpa = calcCPA(spend, displaySales)
-        const recommendation = computeRecommendation(spend, displaySales, profit, roas, as.status)
-
-        return {
-          id: as.id,
-          externalId: as.externalId,
-          name: as.name,
-          parentName: as.campaign?.name || '',
-          status: as.status || 'ACTIVE',
-          budget: as.dailyBudget || as.lifetimeBudget || null,
-          spend,
-          sales: conversions,
-          realSalesCount,
-          cpa,
-          revenue,
-          netRevenue,
-          profit,
-          roas,
-          roi,
-          impressions,
-          margin,
-          cpm: calcCPM(spend, impressions),
-          clicks,
-          cpc: calcCPC(spend, clicks),
-          ctr: calcCTR(clicks, impressions),
-          ic: icCount,
-          cpi: calcCPI(spend, icCount),
-          recommendation
-        }
-      })
-
-      let filteredData = data
-      if (statusFilter === 'ACTIVE') {
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'ACTIVE')
-      } else if (statusFilter === 'PAUSED') {
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'PAUSED' && (item.spend > 0 || item.impressions > 0))
-      } else if (statusFilter === 'ARCHIVED') {
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'ARCHIVED')
-      } else {
-        // Padrão: Apenas ativos ou que tiveram veiculação/gasto no período
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'ACTIVE' || item.spend > 0 || item.impressions > 0)
-      }
-
-      return NextResponse.json({ data: filteredData })
-    }
-
-    if (level === 'ad') {
-      const whereClause: any = { workspaceId }
-      if (search) {
-        whereClause.name = { contains: search, mode: 'insensitive' }
-      }
-
-      const ads = await prisma.ad.findMany({
-        where: whereClause,
-        include: {
-          insights: {
-            where: { dateStart: { gte: from, lte: to } }
-          },
-          adSet: {
-            select: {
-              name: true,
-              campaign: { select: { name: true, adAccountId: true } }
-            }
-          }
-        }
-      })
-
-      const data = ads.map(ad => {
-        const { spend, impressions, clicks, conversions, metaRevenue, icCount } = getCanonicalMetrics(ad.insights)
-
-        // Matching de vendas reais do gateway/banco
-        const matchedSales = sales.filter(s => {
-          if (s.attributionRecord?.adId && (s.attributionRecord.adId === ad.id || s.attributionRecord.adId === ad.externalId)) {
-            return true
-          }
-          const utm = s.utmContent || s.utmCampaign || s.attributionRecord?.utmCampaign
-          if (!utm) return false
-          const nUtm = normalizeForMatch(utm)
-          const nName = normalizeForMatch(ad.name)
-          const nExt = normalizeForMatch(ad.externalId)
-          return nUtm === nName || nUtm === nExt || nName.includes(nUtm) || nUtm.includes(nName)
-        })
-
-        const realSalesCount = matchedSales.length
-        const realGrossRevenue = matchedSales.reduce((acc, s) => acc + (s.grossAmount || 0), 0)
-        const realNetRevenue = matchedSales.reduce((acc, s) => acc + (s.netAmount || 0), 0)
-
-        const displaySales = conversions > 0 ? conversions : realSalesCount
-        const revenue = realGrossRevenue > 0 ? realGrossRevenue : metaRevenue
-        const netRevenue = realNetRevenue > 0 ? realNetRevenue : (revenue * 0.9)
-        const profit = netRevenue - spend
-        const roas = calcROAS(revenue, spend)
-        const roi = calcROI(profit, spend)
-        const margin = calcMargin(profit, revenue)
-        const cpa = calcCPA(spend, displaySales)
-        const recommendation = computeRecommendation(spend, displaySales, profit, roas, ad.status)
-
-        return {
-          id: ad.id,
-          externalId: ad.externalId,
-          name: ad.name,
-          parentName: ad.adSet?.name || '',
-          campaignName: ad.adSet?.campaign?.name || '',
-          previewUrl: ad.previewUrl,
-          status: ad.status || 'ACTIVE',
-          budget: null,
-          spend,
-          sales: conversions,
-          realSalesCount,
-          cpa,
-          revenue,
-          netRevenue,
-          profit,
-          roas,
-          roi,
-          impressions,
-          margin,
-          cpm: calcCPM(spend, impressions),
-          clicks,
-          cpc: calcCPC(spend, clicks),
-          ctr: calcCTR(clicks, impressions),
-          ic: icCount,
-          cpi: calcCPI(spend, icCount),
-          recommendation
-        }
-      })
-
-      let filteredData = data
-      if (statusFilter === 'ACTIVE') {
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'ACTIVE')
-      } else if (statusFilter === 'PAUSED') {
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'PAUSED' && (item.spend > 0 || item.impressions > 0))
-      } else if (statusFilter === 'ARCHIVED') {
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'ARCHIVED')
-      } else {
-        // Padrão: Apenas ativos ou que tiveram veiculação/gasto no período
-        filteredData = data.filter(item => item.status?.toUpperCase() === 'ACTIVE' || item.spend > 0 || item.impressions > 0)
-      }
-
-      return NextResponse.json({ data: filteredData })
-    }
-
-    // Default: campaign level
-    const whereClause: any = { workspaceId }
-    if (adAccountId && adAccountId !== 'all') {
-      whereClause.adAccountId = adAccountId
-    }
-    if (search) {
-      whereClause.name = { contains: search, mode: 'insensitive' }
-    }
-
-    const campaigns = await prisma.campaign.findMany({
-      where: whereClause,
-      include: {
-        insights: {
-          where: { dateStart: { gte: from, lte: to } }
-        },
-        adAccount: { select: { name: true } }
-      }
-    })
-
-    const data = campaigns.map(c => {
-      const { spend, impressions, clicks, conversions, metaRevenue, icCount } = getCanonicalMetrics(c.insights)
-
-      // Matching de vendas reais do gateway/banco
-      const matchedSales = sales.filter(s => {
-        if (s.attributionRecord?.campaignId && (s.attributionRecord.campaignId === c.id || s.attributionRecord.campaignId === c.externalId)) {
-          return true
-        }
-        const utm = s.utmCampaign || s.attributionRecord?.utmCampaign
-        if (!utm) return false
-        const nUtm = normalizeForMatch(utm)
-        const nName = normalizeForMatch(c.name)
-        const nExt = normalizeForMatch(c.externalId)
-        return nUtm === nName || nUtm === nExt || nName.includes(nUtm) || nUtm.includes(nName)
-      })
-
-      const realSalesCount = matchedSales.length
-      const realGrossRevenue = matchedSales.reduce((acc, s) => acc + (s.grossAmount || 0), 0)
-      const realNetRevenue = matchedSales.reduce((acc, s) => acc + (s.netAmount || 0), 0)
-
-      const displaySales = conversions > 0 ? conversions : realSalesCount
-      const revenue = realGrossRevenue > 0 ? realGrossRevenue : metaRevenue
-      const netRevenue = realNetRevenue > 0 ? realNetRevenue : (revenue * 0.9)
-      const profit = netRevenue - spend
-      const roas = calcROAS(revenue, spend)
-      const roi = calcROI(profit, spend)
-      const margin = calcMargin(profit, revenue)
-      const cpa = calcCPA(spend, displaySales)
-      const recommendation = computeRecommendation(spend, displaySales, profit, roas, c.status)
-
-      return {
-        id: c.id,
-        externalId: c.externalId,
-        name: c.name,
-        adAccountName: c.adAccount?.name || '',
-        status: c.status || 'ACTIVE',
-        budget: c.dailyBudget || c.lifetimeBudget || null,
-        spend,
-        sales: conversions,
-        realSalesCount,
-        cpa,
-        revenue,
-        netRevenue,
-        profit,
-        roas,
-        roi,
-        impressions,
-        margin,
-        cpm: calcCPM(spend, impressions),
-        clicks,
-        cpc: calcCPC(spend, clicks),
-        ctr: calcCTR(clicks, impressions),
-        ic: icCount,
-        cpi: calcCPI(spend, icCount),
-        recommendation
-      }
-    })
-
-    let filteredData = data
-    if (statusFilter === 'ACTIVE') {
-      filteredData = data.filter(item => item.status?.toUpperCase() === 'ACTIVE')
-    } else if (statusFilter === 'PAUSED') {
-      filteredData = data.filter(item => item.status?.toUpperCase() === 'PAUSED' && (item.spend > 0 || item.impressions > 0))
-    } else if (statusFilter === 'ARCHIVED') {
-      filteredData = data.filter(item => item.status?.toUpperCase() === 'ARCHIVED')
+    const params = new URL(req.url).searchParams
+    const level = params.get('level') || 'campaign'
+    if (!['campaign', 'adset', 'ad'].includes(level)) return NextResponse.json({ error: 'Nível inválido' }, { status: 400 })
+    const accountId = params.get('adAccountId')
+    const accounts = await prisma.adAccount.findMany({ where: { workspaceId, ...(accountId && accountId !== 'all' ? { id: accountId } : {}) } })
+    if (!accounts.length) return NextResponse.json({ data: [], coverage: [] })
+    const accountIds = accounts.map(a => a.id)
+    const accountMap = new Map(accounts.map(a => [a.id, a]))
+    const dates = new Map(accounts.map(a => {
+      const { from, to } = resolveRange(params.get('preset'), a.timezone, params.get('from'), params.get('to'))
+      return [a.id, { from, to, saleFrom: midnight(from, a.timezone), saleTo: midnight(nextDay(to), a.timezone) }] as const
+    }))
+    const ranges = [...dates.values()]
+    const saleFrom = new Date(Math.min(...ranges.map(d => d.saleFrom.getTime())))
+    const saleTo = new Date(Math.max(...ranges.map(d => d.saleTo.getTime())))
+    const sales = await prisma.sale.findMany({ where: { workspaceId, status: 'approved', OR: [
+      { approvedAt: { gte: saleFrom, lt: saleTo } },
+      { approvedAt: null, orderedAt: { gte: saleFrom, lt: saleTo } },
+    ] },
+      select: { id: true, orderedAt: true, approvedAt: true, grossAmount: true, netAmount: true, currency: true, utmCampaign: true, utmTerm: true, utmContent: true,
+        attributionRecord: { select: { campaignId: true, adSetId: true, adId: true, adAccountId: true, utmCampaign: true } } } })
+    const insightDates = { dateStart: { gte: new Date(Math.min(...ranges.map(d => Date.parse(d.from + 'T00:00:00Z')))), lte: new Date(Math.max(...ranges.map(d => Date.parse(d.to + 'T00:00:00Z')))) } }
+    const search = params.get('search')
+    const name = search ? { name: { contains: search, mode: 'insensitive' as const } } : {}
+    const campaignIds = params.getAll('campaignId')
+    const adSetIds = params.getAll('adSetId')
+    const rows: Row[] = []
+    if (level === 'campaign') {
+      const found = await prisma.campaign.findMany({ where: { workspaceId, adAccountId: { in: accountIds }, ...name }, include: { insights: { where: insightDates }, adAccount: true } })
+      rows.push(...found.map(c => ({ id: c.id, externalId: c.externalId, name: c.name, status: c.status, budget: c.dailyBudget ?? c.lifetimeBudget, accountId: c.adAccountId, accountName: c.adAccount.name, currency: c.adAccount.currency, insights: c.insights })))
+    } else if (level === 'adset') {
+      const found = await prisma.adSet.findMany({ where: { workspaceId, campaign: { adAccountId: { in: accountIds } }, ...(campaignIds.length ? { campaignId: { in: campaignIds } } : {}), ...name }, include: { insights: { where: insightDates }, campaign: true } })
+      rows.push(...found.map(as => { const a = accountMap.get(as.campaign.adAccountId)!; return { id: as.id, externalId: as.externalId, name: as.name, status: as.status, budget: as.dailyBudget ?? as.lifetimeBudget, accountId: a.id, accountName: a.name, currency: a.currency, campaignId: as.campaignId, parentName: as.campaign.name, insights: as.insights } }))
     } else {
-      // Padrão: Apenas ativos ou que tiveram veiculação/gasto no período
-      filteredData = data.filter(item => item.status?.toUpperCase() === 'ACTIVE' || item.spend > 0 || item.impressions > 0)
+      const found = await prisma.ad.findMany({ where: { workspaceId, adSet: { campaign: { adAccountId: { in: accountIds } }, ...(adSetIds.length ? { id: { in: adSetIds } } : {}), ...(campaignIds.length ? { campaignId: { in: campaignIds } } : {}) }, ...name }, include: { insights: { where: insightDates }, adSet: { include: { campaign: true } } } })
+      rows.push(...found.map(ad => { const a = accountMap.get(ad.adSet.campaign.adAccountId)!; return { id: ad.id, externalId: ad.externalId, name: ad.name, status: ad.status, budget: null, accountId: a.id, accountName: a.name, currency: a.currency, campaignId: ad.adSet.campaignId, adSetId: ad.adSetId, parentName: ad.adSet.name, campaignName: ad.adSet.campaign.name, previewUrl: ad.previewUrl, insights: ad.insights } }))
     }
-
-    return NextResponse.json({ data: filteredData })
+    const coverage = await Promise.all(accounts.map(async a => {
+      const logs = await prisma.syncLog.findMany({ where: { workspaceId, adAccountId: a.id, type: 'meta_ads', status: { in: ['success', 'partial', 'failed'] }, startedAt: { gte: new Date(Date.now() - 3 * 86400000) } }, orderBy: { startedAt: 'desc' } })
+      const range = dates.get(a.id)!
+      const latest = logs[0]
+      const spans = logs.filter(log => log.status === 'success' && log.details).flatMap(log => { try { const d = JSON.parse(log.details!); return [{ since: d.since as string, until: d.until as string }] } catch { return [] } })
+      const complete = hasCompleteCoverage(range.from, range.to, latest?.status, spans)
+      return { accountId: a.id, from: range.from, to: range.to, complete, lastSyncAt: a.lastSyncAt, error: logs[0]?.status === 'partial' || logs[0]?.status === 'failed' ? logs[0].errorMessage : null }
+    }))
+    const covered = new Map(coverage.map(c => [c.accountId, c.complete]))
+    const attributionSpecs = await prisma.adSet.findMany({ where: { campaign: { adAccountId: { in: accountIds } } }, select: { id: true, campaignId: true, attributionSpec: true } })
+    const eligible = rows.filter(row => {
+      const range = dates.get(row.accountId)!
+      row.insights = row.insights.filter(i => { const d = i.dateStart.toISOString().slice(0, 10); return d >= range.from && d <= range.to })
+      const m = measure(row.insights)
+      return (m.spend ?? 0) > 0 || (m.impressions ?? 0) > 0
+    }).filter(row => !params.get('status') || params.get('status') === 'all' || row.status.toUpperCase() === params.get('status')?.toUpperCase())
+    const { assigned, unassigned } = assignSales(sales, eligible, level as 'campaign' | 'adset' | 'ad', dates)
+    const ratio = (value: number | null, divisor: number | null) => value !== null && divisor !== null && divisor > 0 ? value / divisor : null
+    const data = eligible.map(row => {
+      const m = measure(row.insights)
+      const complete = covered.get(row.accountId) || false
+      const matched = assigned.get(row.id) || []
+      const sameCurrency = matched.every(s => s.currency.toUpperCase() === row.currency.toUpperCase())
+      const revenue = sameCurrency ? matched.reduce((n, s) => n + s.grossAmount, 0) : null
+      // O normalizador legado grava bruto como líquido quando o gateway omite o valor.
+      // Valores iguais não provam que houve taxa zero; mantemos o líquido ausente.
+      const verifiedNet = matched.every(s => s.netAmount !== s.grossAmount)
+      const netRevenue = sameCurrency && verifiedNet ? matched.reduce((n, s) => n + s.netAmount, 0) : null
+      const spend = complete ? m.spend : null
+      const impressions = complete ? m.impressions : null
+      const clicks = complete ? m.clicks : null
+      const profit = spend !== null && netRevenue !== null ? netRevenue - spend : null
+      const specs = attributionSpecs.filter(as => level === 'campaign' ? as.campaignId === row.id : level === 'adset' ? as.id === row.id : as.id === row.adSetId)
+      const uniqueSpecs = [...new Set(specs.map(as => as.attributionSpec).filter((value): value is string => Boolean(value)))]
+      const metaAttribution = uniqueSpecs.length === 1 && specs.every(as => as.attributionSpec) ? uniqueSpecs[0] : null
+      return { id: row.id, externalId: row.externalId, name: row.name, status: row.status, budget: row.budget, parentName: row.parentName, campaignName: row.campaignName, adAccountName: row.accountName, previewUrl: row.previewUrl, currency: row.currency,
+        spend, impressions, clicks, sales: matched.length, metaPurchases: complete ? m.metaPurchases : null, metaAttribution, revenue, netRevenue, profit,
+        cpa: ratio(spend, matched.length), roas: ratio(netRevenue, spend), grossRoas: ratio(revenue, spend), roi: profit !== null && spend !== null && spend > 0 ? profit / spend * 100 : null,
+        margin: profit !== null && revenue !== null && revenue > 0 ? profit / revenue * 100 : null,
+        cpm: spend !== null && impressions !== null && impressions > 0 ? spend / impressions * 1000 : null, cpc: ratio(spend, clicks),
+        ctr: clicks !== null && impressions !== null && impressions > 0 ? clicks / impressions * 100 : null, ic: complete ? m.ic : null,
+        cpi: ratio(spend, complete ? m.ic : null) }
+    })
+    return NextResponse.json({ data, coverage, attribution: { approved: sales.length, attributed: sales.length - unassigned, unassigned }, metaAttribution: 'Configuração de atribuição do conjunto' })
   } catch (error) {
     console.error('Error fetching meta insights:', error)
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })

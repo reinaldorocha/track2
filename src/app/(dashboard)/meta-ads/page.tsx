@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -8,23 +8,14 @@ import {
   RefreshCw,
   Plus,
   Trash2,
-  ExternalLink,
-  CheckCircle2,
   AlertTriangle,
-  Layers,
-  BarChart2,
-  Sliders,
-  DollarSign,
-  Sparkles,
-  Link as LinkIcon,
   CheckSquare,
   Square,
-  ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
-import { getDateRange, formatCurrency, formatDate, formatDateTime, formatNumber } from "@/lib/utils";
-import { CampaignsTable, MetaTableLevel } from "@/components/meta-ads/campaigns-table";
+import { getDateRange, formatDate, formatDateTime } from "@/lib/utils";
+import { CampaignsTable } from "@/components/meta-ads/campaigns-table";
 
 type AdAccount = {
   id: string;
@@ -36,6 +27,8 @@ type AdAccount = {
   lastSyncAt: string | null;
   createdAt: string;
 };
+
+const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 function MetaAdsContent() {
   const router = useRouter();
@@ -49,9 +42,11 @@ function MetaAdsContent() {
   });
 
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
-  const [isSelectModalOpen, setIsSelectModalOpen] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isSelectModalOpen, setIsSelectModalOpen] = useState(searchParams.get("connected") === "true");
+  const [selectedIdsOverride, setSelectedIdsOverride] = useState<string[] | null>(null);
   const [selectedAdAccount, setSelectedAdAccount] = useState("all");
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
+  const [selectedAdSetIds, setSelectedAdSetIds] = useState<string[]>([]);
 
   const [manualAccount, setManualAccount] = useState({
     name: "",
@@ -91,42 +86,15 @@ function MetaAdsContent() {
   });
 
   const accounts: AdAccount[] = accountsData?.accounts || [];
+  const selectedIds = selectedIdsOverride ?? accounts.map((account) => account.id);
   const needsReconnect = accounts.some((a) => a.status === "reconnect_required");
-
-  // Verificar se o usuário acabou de voltar do OAuth
-  useEffect(() => {
-    if (searchParams.get("connected") === "true") {
-      setIsSelectModalOpen(true);
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (accounts.length > 0 && selectedIds.length === 0) {
-      setSelectedIds(accounts.map((a) => a.id));
-    }
-  }, [accounts]);
 
   // Mutação para sincronização passo a passo
   const syncMutation = useMutation({
     mutationFn: async (accountId?: string) => {
       setSyncStep(1);
-      setSyncMessage("1/5: Conectando com a Meta Graph API v21.0...");
-      await new Promise((r) => setTimeout(r, 400));
-
-      setSyncStep(2);
-      setSyncMessage("2/5: Sincronizando campanhas ativas...");
-      await new Promise((r) => setTimeout(r, 400));
-
-      setSyncStep(3);
-      setSyncMessage("3/5: Sincronizando conjuntos de anúncios e orçamentos...");
-      await new Promise((r) => setTimeout(r, 400));
-
-      setSyncStep(4);
-      setSyncMessage("4/5: Sincronizando criativos e anúncios...");
-      await new Promise((r) => setTimeout(r, 400));
-
-      setSyncStep(5);
-      setSyncMessage("5/5: Importando métricas diárias e conversões (Insights)...");
+      setSyncDetail(null);
+      setSyncMessage("Sincronizando contas, anúncios e insights da Meta...");
 
       const res = await fetch("/api/meta/sync", {
         method: "POST",
@@ -135,14 +103,17 @@ function MetaAdsContent() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro na sincronização");
+      if (!res.ok || data.success === false) {
+        const errors = data.errors || data.results?.flatMap((result: { errors?: string[] }) => result.errors || []);
+        throw new Error(errors?.join('; ') || data.error || "Erro na sincronização");
+      }
       return data;
     },
     onSuccess: (data) => {
       setSyncStep(6);
       setSyncMessage("Sincronização concluída com sucesso!");
-      if (data?.results?.[0]) {
-        const first = data.results[0];
+      if (data?.results?.[0] || data?.campaigns !== undefined) {
+        const first = data.results?.[0] || data;
         setSyncDetail({
           campaigns: first.campaigns,
           adSets: first.adSets,
@@ -221,15 +192,17 @@ function MetaAdsContent() {
 
   const toggleSelectAll = () => {
     if (selectedIds.length === accounts.length) {
-      setSelectedIds([]);
+      setSelectedIdsOverride([]);
     } else {
-      setSelectedIds(accounts.map((a) => a.id));
+      setSelectedIdsOverride(accounts.map((a) => a.id));
     }
   };
 
   const toggleAccount = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    setSelectedIdsOverride((prev) =>
+      (prev ?? accounts.map((a) => a.id)).includes(id)
+        ? (prev ?? accounts.map((a) => a.id)).filter((item) => item !== id)
+        : [...(prev ?? accounts.map((a) => a.id)), id]
     );
   };
 
@@ -297,6 +270,7 @@ function MetaAdsContent() {
               </div>
             </div>
           )}
+          {autoSyncData?.lastError && <span className="text-xs text-amber-700" title={autoSyncData.lastError}>Último sync incompleto: {autoSyncData.lastError}</span>}
 
           <PeriodSelector
             value={period.preset}
@@ -325,10 +299,9 @@ function MetaAdsContent() {
           {syncStep > 0 && (
             <div className="w-full bg-blue-200 dark:bg-blue-900/60 rounded-full h-2 overflow-hidden">
               <div
-                className={`h-2 rounded-full transition-all duration-500 ${
+                className={`h-2 w-full rounded-full ${syncStep === 6 ? '' : 'animate-pulse'} ${
                   syncStep === 6 ? "bg-emerald-500" : "bg-blue-600"
                 }`}
-                style={{ width: `${Math.min(syncStep * 20, 100)}%` }}
               />
             </div>
           )}
@@ -363,6 +336,18 @@ function MetaAdsContent() {
             );
           })}
         </div>
+
+        {activeTab !== "Contas" && (
+          <select
+            aria-label="Filtrar conta de anúncios"
+            value={selectedAdAccount}
+            onChange={(event) => { setSelectedAdAccount(event.target.value); setSelectedCampaignIds([]); setSelectedAdSetIds([]); }}
+            className="mr-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 dark:border-[#142C52] dark:bg-[#081A33] dark:text-slate-200"
+          >
+            <option value="all">Todas as contas</option>
+            {accounts.map(account => <option key={account.id} value={account.id}>{account.name} ({account.currency})</option>)}
+          </select>
+        )}
 
         {/* Ações da Aba Contas */}
         {activeTab === "Contas" && (
@@ -492,13 +477,23 @@ function MetaAdsContent() {
         </div>
       )}
 
+      {(selectedCampaignIds.length > 0 || selectedAdSetIds.length > 0) && (
+        <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+          <span>{selectedCampaignIds.length} campanha(s) e {selectedAdSetIds.length} conjunto(s) selecionado(s). A seleção filtra as próximas abas.</span>
+          <button type="button" className="font-bold underline" onClick={() => { setSelectedCampaignIds([]); setSelectedAdSetIds([]); }}>Limpar seleção</button>
+        </div>
+      )}
+
       {/* Aba CAMPANHAS */}
       {activeTab === "Campanhas" && (
         <CampaignsTable
           level="campaign"
           adAccountId={selectedAdAccount}
-          periodFrom={period.from.toISOString()}
-          periodTo={period.to.toISOString()}
+          selectedIds={selectedCampaignIds}
+          onSelectedIdsChange={(ids) => { setSelectedCampaignIds(ids); setSelectedAdSetIds([]); }}
+          periodFrom={localDate(period.from)}
+          periodTo={localDate(period.to)}
+          periodPreset={period.preset}
         />
       )}
 
@@ -507,8 +502,12 @@ function MetaAdsContent() {
         <CampaignsTable
           level="adset"
           adAccountId={selectedAdAccount}
-          periodFrom={period.from.toISOString()}
-          periodTo={period.to.toISOString()}
+          campaignIds={selectedCampaignIds}
+          selectedIds={selectedAdSetIds}
+          onSelectedIdsChange={setSelectedAdSetIds}
+          periodFrom={localDate(period.from)}
+          periodTo={localDate(period.to)}
+          periodPreset={period.preset}
         />
       )}
 
@@ -517,8 +516,11 @@ function MetaAdsContent() {
         <CampaignsTable
           level="ad"
           adAccountId={selectedAdAccount}
-          periodFrom={period.from.toISOString()}
-          periodTo={period.to.toISOString()}
+          campaignIds={selectedCampaignIds}
+          adSetIds={selectedAdSetIds}
+          periodFrom={localDate(period.from)}
+          periodTo={localDate(period.to)}
+          periodPreset={period.preset}
         />
       )}
 

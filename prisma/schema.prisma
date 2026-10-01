@@ -179,6 +179,7 @@ model AdSet {
   dailyBudget         Float?
   lifetimeBudget      Float?
   optimizationGoal    String?
+  attributionSpec     String?  // JSON da janela/configuração de atribuição do conjunto na Meta
   billingEvent        String?
   bidAmount           Float?
   startTime           DateTime?
