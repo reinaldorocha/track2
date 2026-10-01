@@ -62,6 +62,9 @@ describe('Meta Ads sync sob limite de requisições', () => {
       const second = await syncAdAccount(workspace.id, account.id)
       assert.equal(second.rateLimited, true)
       assert.equal(paths.length, 2)
+      const manualRetry = await syncAdAccount(workspace.id, account.id, true)
+      assert.equal(manualRetry.rateLimited, true)
+      assert.equal(paths.length, 4)
       assert.equal(summarizeMetaSyncError('Conjuntos A: User request limit reached; Conjuntos B: User request limit reached'),
         'Limite de requisições da Meta atingido. A coleta foi interrompida e será retomada após o intervalo de espera.')
     } finally {
