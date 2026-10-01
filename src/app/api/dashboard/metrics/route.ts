@@ -8,6 +8,7 @@ import {
 } from '@/lib/metrics'
 import { calculateFinancialMetrics } from '@/lib/calculations/financial-engine'
 import { triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
+import { resolveAnalyticsInterval, nextDay } from '@/lib/meta/insight-helpers'
 import { after } from 'next/server'
 
 export async function GET(req: Request) {
@@ -16,13 +17,6 @@ export async function GET(req: Request) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-
-    const { searchParams } = new URL(req.url)
-    const fromStr = searchParams.get('from')
-    const toStr = searchParams.get('to')
-
-    const from = fromStr ? new Date(fromStr) : new Date(Date.now() - 30 * 86400000)
-    const to = toStr ? new Date(toStr) : new Date()
 
     const workspaceId = await getUserWorkspaceId(session.user.id)
     if (!workspaceId) {
@@ -35,11 +29,27 @@ export async function GET(req: Request) {
     // Disparo não-bloqueante de auto-sync em background para manter métricas de Meta Ads atualizadas
     after(() => triggerBackgroundMetaSyncIfNeeded(workspaceId, 15).then(() => {}))
 
+    const { searchParams } = new URL(req.url)
+    const preset = searchParams.get('preset')
+    const fromStr = searchParams.get('from')
+    const toStr = searchParams.get('to')
+
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { timezone: true }
+    })
+    const tz = workspace?.timezone || 'America/Sao_Paulo'
+    const interval = resolveAnalyticsInterval(preset, tz, fromStr, toStr)
+
     // 1. Consultar Vendas Reais do Período
     const allSales = await prisma.sale.findMany({
       where: {
         workspaceId,
-        orderedAt: { gte: from, lte: to }
+        OR: [
+          { approvedAt: { gte: interval.saleFrom, lt: interval.saleTo } },
+          { approvedAt: null, orderedAt: { gte: interval.saleFrom, lt: interval.saleTo } },
+          { orderedAt: { gte: interval.saleFrom, lt: interval.saleTo } }
+        ]
       },
       select: {
         id: true,
@@ -48,6 +58,8 @@ export async function GET(req: Request) {
         status: true,
         platform: true,
         orderedAt: true,
+        approvedAt: true,
+        refundedAt: true,
         utmSource: true
       }
     })
@@ -55,19 +67,29 @@ export async function GET(req: Request) {
     const totalSales = allSales.length
     const approvedSalesList = allSales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'approved' || st === 'paid' || st === 'aprovado' || st === 'pago' || st === 'completed'
+      const isApproved = st === 'approved' || st === 'paid' || st === 'aprovado' || st === 'pago' || st === 'completed'
+      if (!isApproved) return false
+      const soldAt = s.approvedAt ?? s.orderedAt
+      return soldAt >= interval.saleFrom && soldAt < interval.saleTo
     })
     const pendingSalesList = allSales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'pending' || st === 'waiting_payment' || st === 'aguardando' || st === 'gerado'
+      const isPending = st === 'pending' || st === 'waiting_payment' || st === 'aguardando' || st === 'gerado'
+      if (!isPending) return false
+      return s.orderedAt >= interval.saleFrom && s.orderedAt < interval.saleTo
     })
     const refundedSalesList = allSales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'refunded' || st === 'reembolsado' || st === 'estornado'
+      const isRefunded = st === 'refunded' || st === 'reembolsado' || st === 'estornado'
+      if (!isRefunded) return false
+      const refAt = s.refundedAt ?? s.orderedAt
+      return refAt >= interval.saleFrom && refAt < interval.saleTo
     })
     const chargebackSalesList = allSales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'chargeback' || st === 'dispute'
+      const isChargeback = st === 'chargeback' || st === 'dispute'
+      if (!isChargeback) return false
+      return s.orderedAt >= interval.saleFrom && s.orderedAt < interval.saleTo
     })
 
     const grossRevenue = approvedSalesList.reduce((acc, s) => acc + s.grossAmount, 0)
@@ -80,12 +102,11 @@ export async function GET(req: Request) {
     const refundedSales = refundedSalesList.length
     const chargebacks = chargebackSalesList.length
 
-    // 2. Consultar Gastos e Insights do Meta Ads no Período
+    // 2. Consultar Gastos e Insights do Meta Ads no Período (alinhado em UTC)
     const insightsAgg = await prisma.campaignInsight.aggregate({
       where: {
         campaign: { workspaceId },
-        dateStart: { gte: from },
-        dateStop: { lte: to }
+        dateStart: { gte: interval.insightDateStart, lte: interval.insightDateStop }
       },
       _sum: {
         spend: true,
@@ -102,7 +123,7 @@ export async function GET(req: Request) {
     const trackingEvents = await prisma.trackingEvent.findMany({
       where: {
         workspaceId,
-        eventTime: { gte: from, lte: to }
+        eventTime: { gte: interval.saleFrom, lt: interval.saleTo }
       },
       select: {
         eventName: true,
@@ -122,7 +143,7 @@ export async function GET(req: Request) {
     const expenses = await prisma.expense.findMany({
       where: {
         workspaceId,
-        date: { gte: from, lte: to },
+        date: { gte: interval.insightDateStart, lte: interval.saleTo },
         isActive: true
       }
     })
@@ -156,12 +177,12 @@ export async function GET(req: Request) {
     const realRoas = financial.realRoas
 
     // 6. Série Temporal REAL para Gráficos
-    const isSingleDay = Math.abs(to.getTime() - from.getTime()) <= 86400000 + 3600000 // <= 25 horas (Hoje/Ontem)
+    const isSingleDay = interval.startDayStr === interval.endDayStr
 
     const chartMap = new Map<string, { date: string; revenue: number; spend: number; profit: number }>()
 
     if (isSingleDay) {
-      // Série horária (00:00 às 23:00)
+      // Série horária (00:00 às 23:00) no timezone
       for (let h = 0; h < 24; h++) {
         const hourStr = `${String(h).padStart(2, '0')}:00`
         chartMap.set(hourStr, {
@@ -173,25 +194,27 @@ export async function GET(req: Request) {
       }
 
       for (const s of approvedSalesList) {
-        const h = new Date(s.orderedAt).getHours()
-        const hourStr = `${String(h).padStart(2, '0')}:00`
+        const soldAt = s.approvedAt ?? s.orderedAt
+        const saleHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }).format(new Date(soldAt)))
+        const hourStr = `${String(saleHour).padStart(2, '0')}:00`
         const entry = chartMap.get(hourStr)
         if (entry) {
           entry.revenue += s.netAmount || s.grossAmount || 0
         }
       }
     } else {
-      // Série diária (dd/MM)
-      const cur = new Date(from)
-      while (cur <= to) {
-        const key = cur.toISOString().slice(0, 10)
-        const label = `${cur.getDate().toString().padStart(2, '0')}/${(cur.getMonth() + 1).toString().padStart(2, '0')}`
-        chartMap.set(key, { date: label, revenue: 0, spend: 0, profit: 0 })
-        cur.setDate(cur.getDate() + 1)
+      // Série diária (dd/MM) normalizada
+      let curDay = interval.startDayStr
+      while (curDay <= interval.endDayStr) {
+        const parts = curDay.split('-')
+        const label = `${parts[2]}/${parts[1]}`
+        chartMap.set(curDay, { date: label, revenue: 0, spend: 0, profit: 0 })
+        curDay = nextDay(curDay)
       }
 
       for (const s of approvedSalesList) {
-        const key = new Date(s.orderedAt).toISOString().slice(0, 10)
+        const soldAt = s.approvedAt ?? s.orderedAt
+        const key = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(soldAt))
         const entry = chartMap.get(key)
         if (entry) {
           entry.revenue += s.netAmount || s.grossAmount || 0
@@ -202,13 +225,13 @@ export async function GET(req: Request) {
         const dailyInsights = await prisma.campaignInsight.findMany({
           where: {
             campaign: { workspaceId },
-            dateStart: { gte: from, lte: to }
+            dateStart: { gte: interval.insightDateStart, lte: interval.insightDateStop }
           },
           select: { dateStart: true, spend: true }
         })
 
         for (const ins of dailyInsights) {
-          const key = new Date(ins.dateStart).toISOString().slice(0, 10)
+          const key = ins.dateStart.toISOString().slice(0, 10)
           const entry = chartMap.get(key)
           if (entry) {
             entry.spend += ins.spend || 0

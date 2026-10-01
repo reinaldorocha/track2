@@ -245,6 +245,7 @@ export default function DashboardPage() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: [
       'summary-consolidated',
+      period.preset,
       period.from.toISOString(),
       period.to.toISOString(),
       selectedAdAccount,
@@ -254,6 +255,7 @@ export default function DashboardPage() {
     ],
     queryFn: async () => {
       const params = new URLSearchParams({
+        preset: period.preset,
         from: period.from.toISOString(),
         to: period.to.toISOString(),
         adAccountId: selectedAdAccount,

@@ -89,3 +89,29 @@ export function hasCompleteCoverage(from: string, to: string, latestStatus: stri
   }
   return false
 }
+
+export function resolveAnalyticsInterval(
+  preset: string | null,
+  timezone = 'America/Sao_Paulo',
+  fromStr?: string | null,
+  toStr?: string | null,
+  now = new Date()
+) {
+  const { from: startDayStr, to: endDayStr } = resolveRange(preset, timezone, fromStr || null, toStr || null, now)
+
+  const saleFrom = midnight(startDayStr, timezone)
+  const saleTo = midnight(nextDay(endDayStr), timezone)
+
+  const insightDateStart = new Date(`${startDayStr}T00:00:00.000Z`)
+  const insightDateStop = new Date(`${endDayStr}T23:59:59.999Z`)
+
+  return {
+    startDayStr,
+    endDayStr,
+    saleFrom,
+    saleTo,
+    insightDateStart,
+    insightDateStop,
+    timezone
+  }
+}

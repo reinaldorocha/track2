@@ -9,6 +9,7 @@ import {
 } from '@/lib/metrics'
 import { calculateFinancialMetrics, calculateSaleFee } from '@/lib/calculations/financial-engine'
 import { triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
+import { resolveAnalyticsInterval, nextDay } from '@/lib/meta/insight-helpers'
 import { after } from 'next/server'
 
 export async function GET(req: Request) {
@@ -26,6 +27,7 @@ export async function GET(req: Request) {
     after(() => triggerBackgroundMetaSyncIfNeeded(workspaceId, 15).then(() => {}))
 
     const { searchParams } = new URL(req.url)
+    const preset = searchParams.get('preset')
     const fromStr = searchParams.get('from')
     const toStr = searchParams.get('to')
     const adAccountId = searchParams.get('adAccountId')
@@ -33,13 +35,21 @@ export async function GET(req: Request) {
     const utmSource = searchParams.get('utmSource')
     const productId = searchParams.get('productId')
 
-    const from = fromStr ? new Date(fromStr) : new Date(Date.now() - 30 * 86400000)
-    const to = toStr ? new Date(toStr) : new Date()
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { timezone: true }
+    })
+    const tz = workspace?.timezone || 'America/Sao_Paulo'
+    const interval = resolveAnalyticsInterval(preset, tz, fromStr, toStr)
 
-    // 1. Base query for sales
+    // 1. Base query for sales (respeitando fuso horário e confirmação de pagamento)
     const salesWhere: Prisma.SaleWhereInput = {
       workspaceId,
-      orderedAt: { gte: from, lte: to }
+      OR: [
+        { approvedAt: { gte: interval.saleFrom, lt: interval.saleTo } },
+        { approvedAt: null, orderedAt: { gte: interval.saleFrom, lt: interval.saleTo } },
+        { orderedAt: { gte: interval.saleFrom, lt: interval.saleTo } }
+      ]
     }
 
     if (platform && platform !== 'all') {
@@ -60,19 +70,29 @@ export async function GET(req: Request) {
     const totalSales = sales.length
     const approvedSales = sales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'approved' || st === 'paid' || st === 'aprovado' || st === 'pago' || st === 'completed'
+      const isApproved = st === 'approved' || st === 'paid' || st === 'aprovado' || st === 'pago' || st === 'completed'
+      if (!isApproved) return false
+      const soldAt = s.approvedAt ?? s.orderedAt
+      return soldAt >= interval.saleFrom && soldAt < interval.saleTo
     })
     const pendingSales = sales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'pending' || st === 'waiting_payment' || st === 'aguardando' || st === 'gerado'
+      const isPending = st === 'pending' || st === 'waiting_payment' || st === 'aguardando' || st === 'gerado'
+      if (!isPending) return false
+      return s.orderedAt >= interval.saleFrom && s.orderedAt < interval.saleTo
     })
     const refundedSales = sales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'refunded' || st === 'reembolsado' || st === 'estornado'
+      const isRefunded = st === 'refunded' || st === 'reembolsado' || st === 'estornado'
+      if (!isRefunded) return false
+      const refAt = s.refundedAt ?? s.orderedAt
+      return refAt >= interval.saleFrom && refAt < interval.saleTo
     })
     const chargebackSales = sales.filter(s => {
       const st = (s.status || '').toLowerCase()
-      return st === 'chargeback' || st === 'dispute'
+      const isChargeback = st === 'chargeback' || st === 'dispute'
+      if (!isChargeback) return false
+      return s.orderedAt >= interval.saleFrom && s.orderedAt < interval.saleTo
     })
 
     const grossRevenue = approvedSales.reduce((acc, s) => acc + s.grossAmount, 0)
@@ -83,14 +103,13 @@ export async function GET(req: Request) {
     const ticketMedio = approvedSales.length > 0 ? (grossRevenue / approvedSales.length) : 0
     const taxaAprovacao = totalSales > 0 ? ((approvedSales.length / totalSales) * 100) : 0
 
-    // 2. Investimento Meta Ads & Insights
+    // 2. Investimento Meta Ads & Insights (com datas diárias UTC alinhadas)
     const insightWhere: Prisma.CampaignInsightWhereInput = {
       campaign: {
         workspaceId,
         ...(adAccountId && adAccountId !== 'all' ? { adAccountId } : {})
       },
-      dateStart: { gte: from },
-      dateStop: { lte: to }
+      dateStart: { gte: interval.insightDateStart, lte: interval.insightDateStop }
     }
 
     const insightsAgg = await prisma.campaignInsight.aggregate({
@@ -106,7 +125,7 @@ export async function GET(req: Request) {
     const trackingEvents = await prisma.trackingEvent.findMany({
       where: {
         workspaceId,
-        eventTime: { gte: from, lte: to }
+        eventTime: { gte: interval.saleFrom, lt: interval.saleTo }
       },
       select: { eventName: true, eventTime: true, value: true }
     })
@@ -152,7 +171,7 @@ export async function GET(req: Request) {
     const expenses = await prisma.expense.findMany({
       where: {
         workspaceId,
-        date: { gte: from, lte: to },
+        date: { gte: interval.insightDateStart, lte: interval.saleTo },
         isActive: true
       }
     })
@@ -262,7 +281,8 @@ export async function GET(req: Request) {
     })
 
     for (const sale of approvedSales) {
-      const saleHour = new Date(sale.orderedAt).getHours()
+      const soldAt = sale.approvedAt ?? sale.orderedAt
+      const saleHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' }).format(new Date(soldAt)))
       if (saleHour >= 0 && saleHour < 24) {
         const fee = calculateSaleFee(sale, fees)
         const net = Math.max(0, sale.grossAmount - fee)
@@ -493,19 +513,17 @@ export async function GET(req: Request) {
       percentage: grossRevenue > 0 ? Number(((val.revenue / grossRevenue) * 100).toFixed(2)) : 0
     })).sort((a, b) => b.revenue - a.revenue)
 
-    // 13. Evolução Diária (Vendas/Dia)
+    // 13. Evolução Diária (Vendas/Dia normalizada no timezone)
     const dailyMap = new Map<string, { date: string; revenue: number; spend: number; profit: number; sales: number }>()
-    const start = new Date(from)
-    const end = new Date(to)
-    const curDate = new Date(start)
-    while (curDate <= end) {
-      const dateKey = curDate.toISOString().slice(0, 10)
-      dailyMap.set(dateKey, { date: dateKey, revenue: 0, spend: 0, profit: 0, sales: 0 })
-      curDate.setDate(curDate.getDate() + 1)
+    let curDay = interval.startDayStr
+    while (curDay <= interval.endDayStr) {
+      dailyMap.set(curDay, { date: curDay, revenue: 0, spend: 0, profit: 0, sales: 0 })
+      curDay = nextDay(curDay)
     }
 
     for (const s of approvedSales) {
-      const dateKey = new Date(s.orderedAt).toISOString().slice(0, 10)
+      const soldAt = s.approvedAt ?? s.orderedAt
+      const dateKey = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(soldAt))
       const cur = dailyMap.get(dateKey)
       if (cur) {
         cur.revenue += s.grossAmount
@@ -518,7 +536,7 @@ export async function GET(req: Request) {
       select: { dateStart: true, spend: true }
     })
     for (const ins of dailyInsights) {
-      const dateKey = new Date(ins.dateStart).toISOString().slice(0, 10)
+      const dateKey = ins.dateStart.toISOString().slice(0, 10)
       const cur = dailyMap.get(dateKey)
       if (cur) {
         cur.spend += ins.spend || 0
@@ -564,8 +582,9 @@ export async function GET(req: Request) {
     }
 
     for (const s of approvedSales) {
-      const d = new Date(s.orderedAt)
-      const dayIndex = d.getDay()
+      const soldAt = s.approvedAt ?? s.orderedAt
+      const saleDayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(soldAt))
+      const dayIndex = new Date(`${saleDayStr}T12:00:00Z`).getUTCDay()
       const item = weekdayMap.get(dayIndex)
       if (item) {
         const fee = calculateSaleFee(s, fees)
@@ -577,8 +596,8 @@ export async function GET(req: Request) {
     }
 
     for (const ins of dailyInsights) {
-      const d = new Date(ins.dateStart)
-      const dayIndex = d.getDay()
+      const insightDayStr = ins.dateStart.toISOString().slice(0, 10)
+      const dayIndex = new Date(`${insightDayStr}T12:00:00Z`).getUTCDay()
       const item = weekdayMap.get(dayIndex)
       if (item) {
         item.spend += ins.spend || 0

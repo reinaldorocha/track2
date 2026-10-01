@@ -34,7 +34,7 @@ export async function GET(req: Request) {
     ] },
       select: { id: true, orderedAt: true, approvedAt: true, grossAmount: true, netAmount: true, currency: true, utmCampaign: true, utmTerm: true, utmContent: true,
         attributionRecord: { select: { campaignId: true, adSetId: true, adId: true, adAccountId: true, utmCampaign: true } } } })
-    const insightDates = { dateStart: { gte: new Date(Math.min(...ranges.map(d => Date.parse(d.from + 'T00:00:00Z')))), lte: new Date(Math.max(...ranges.map(d => Date.parse(d.to + 'T00:00:00Z')))) } }
+    const insightDates = { dateStart: { gte: new Date(Math.min(...ranges.map(d => Date.parse(d.from + 'T00:00:00Z')))), lte: new Date(Math.max(...ranges.map(d => Date.parse(d.to + 'T23:59:59.999Z')))) } }
     const search = params.get('search')
     const name = search ? { name: { contains: search, mode: 'insensitive' as const } } : {}
     const campaignIds = params.getAll('campaignId')
@@ -92,16 +92,16 @@ export async function GET(req: Request) {
       // Valores iguais não provam que houve taxa zero; mantemos o líquido ausente.
       const verifiedNet = matched.every(s => s.netAmount !== s.grossAmount)
       const netRevenue = sameCurrency && verifiedNet ? matched.reduce((n, s) => n + s.netAmount, 0) : null
-      const spend = complete ? m.spend : null
-      const impressions = complete ? m.impressions : null
-      const clicks = complete ? m.clicks : null
+      const spend = (complete || m.spend !== null) ? m.spend : null
+      const impressions = (complete || m.impressions !== null) ? m.impressions : null
+      const clicks = (complete || m.clicks !== null) ? m.clicks : null
       const profit = spend !== null && netRevenue !== null ? netRevenue - spend : null
       const specs = attributionSpecs.filter(as => level === 'campaign' ? as.campaignId === row.id : level === 'adset' ? as.id === row.id : as.id === row.adSetId)
       const uniqueSpecs = [...new Set(specs.map(as => as.attributionSpec).filter((value): value is string => Boolean(value)))]
       const metaAttribution = uniqueSpecs.length === 1 && specs.every(as => as.attributionSpec) ? uniqueSpecs[0] : null
 
-      const metaPurchases = complete ? m.metaPurchases : null
-      const cpaMeta = complete && metaPurchases !== null && metaPurchases > 0 && spend !== null ? Math.round((spend / metaPurchases) * 100) / 100 : null
+      const metaPurchases = (complete || m.metaPurchases !== null) ? m.metaPurchases : null
+      const cpaMeta = metaPurchases !== null && metaPurchases > 0 && spend !== null ? Math.round((spend / metaPurchases) * 100) / 100 : null
       const metaTaxAmount = spend !== null && metaAdsTaxRate > 0 ? (spend * (metaAdsTaxRate / 100)) : 0
       const salesTaxAmount = revenue !== null && salesTaxRate > 0 ? (revenue * (salesTaxRate / 100)) : 0
       const taxesAmount = (spend !== null || revenue !== null) ? Math.round((metaTaxAmount + salesTaxAmount) * 100) / 100 : null
@@ -117,8 +117,8 @@ export async function GET(req: Request) {
         cpa: ratio(spend, matched.length), cpaMeta, taxes: taxesAmount, taxesBreakdown, roas: ratio(netRevenue, spend), grossRoas: ratio(revenue, spend), roi: profit !== null && spend !== null && spend > 0 ? profit / spend * 100 : null,
         margin: profit !== null && revenue !== null && revenue > 0 ? profit / revenue * 100 : null,
         cpm: spend !== null && impressions !== null && impressions > 0 ? spend / impressions * 1000 : null, cpc: ratio(spend, clicks),
-        ctr: clicks !== null && impressions !== null && impressions > 0 ? clicks / impressions * 100 : null, ic: complete ? m.ic : null,
-        cpi: ratio(spend, complete ? m.ic : null) }
+        ctr: clicks !== null && impressions !== null && impressions > 0 ? clicks / impressions * 100 : null, ic: (complete || m.ic !== null) ? m.ic : null,
+        cpi: ratio(spend, (complete || m.ic !== null) ? m.ic : null) }
     })
     return NextResponse.json({ data, coverage, attribution: { approved: sales.length, attributed: sales.length - unassigned, unassigned }, metaAttribution: 'Configuração de atribuição do conjunto' })
   } catch (error) {
