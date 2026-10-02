@@ -4,6 +4,26 @@ const BASE = 'https://graph.facebook.com/v21.0'
 
 export type MetaAction = { action_type: string; value: string }
 export type MetaAdAccount = { id: string; name: string; account_id?: string; currency?: string; timezone_name?: string; account_status?: number; amount_spent?: string; business_name?: string }
+export type MetaAccountBalanceInfo = {
+  id: string
+  name: string
+  account_id?: string
+  account_status?: number
+  disable_reason?: number
+  currency?: string
+  timezone_name?: string
+  is_prepay_account?: boolean
+  balance?: string
+  spend_cap?: string
+  amount_spent?: string
+  min_daily_budget?: number
+  funding_source_details?: {
+    id?: string
+    display_string?: string
+    type?: number
+  }
+  business_name?: string
+}
 export type MetaCampaign = { id: string; name: string; status?: string; objective?: string; buying_type?: string; daily_budget?: string; lifetime_budget?: string; start_time?: string; stop_time?: string }
 export type MetaAdSet = { id: string; campaign_id: string; name: string; status?: string; daily_budget?: string; lifetime_budget?: string; optimization_goal?: string; attribution_spec?: unknown; billing_event?: string; bid_amount?: string; start_time?: string; end_time?: string }
 export type MetaAd = { id: string; adset_id: string; name: string; status?: string; creative?: { id?: string; image_url?: string; thumbnail_url?: string } }
@@ -82,6 +102,13 @@ export class MetaApiClient {
     return this.getAll<MetaAdAccount>('/me/adaccounts', {
       fields: 'id,name,account_id,currency,timezone_name,account_status,amount_spent,business_name',
       limit: '100',
+    })
+  }
+
+  async getAdAccountBalance(adAccountId: string): Promise<MetaAccountBalanceInfo> {
+    const accountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`
+    return this.get<MetaAccountBalanceInfo>(`/${accountId}`, {
+      fields: 'id,name,account_id,account_status,disable_reason,currency,timezone_name,is_prepay_account,balance,spend_cap,amount_spent,min_daily_budget,funding_source_details,business_name',
     })
   }
   

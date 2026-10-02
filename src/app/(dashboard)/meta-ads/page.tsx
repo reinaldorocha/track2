@@ -15,11 +15,13 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   X,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
 import { getDateRange, formatDate, formatDateTime } from "@/lib/utils";
 import { CampaignsTable } from "@/components/meta-ads/campaigns-table";
+import { BalanceMonitor } from "@/components/meta-ads/balance-monitor";
 
 type AdAccount = {
   id: string;
@@ -39,7 +41,15 @@ function MetaAdsContent() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"Contas" | "Campanhas" | "Conjuntos" | "Anúncios">("Contas");
+  const tabParam = searchParams.get("tab");
+  const initialTab: "Contas" | "Campanhas" | "Conjuntos" | "Anúncios" | "Saldo & Limites" =
+    tabParam === "saldo" || tabParam === "Saldo & Limites"
+      ? "Saldo & Limites"
+      : tabParam === "Campanhas" || tabParam === "Conjuntos" || tabParam === "Anúncios" || tabParam === "Contas"
+      ? tabParam
+      : "Contas";
+
+  const [activeTab, setActiveTab] = useState<"Contas" | "Campanhas" | "Conjuntos" | "Anúncios" | "Saldo & Limites">(initialTab);
   const [period, setPeriod] = useState({
     preset: "Hoje",
     ...getDateRange("today"),
@@ -271,11 +281,12 @@ function MetaAdsContent() {
     );
   };
 
-  const tabs: Array<"Contas" | "Campanhas" | "Conjuntos" | "Anúncios"> = [
+  const tabs: Array<"Contas" | "Campanhas" | "Conjuntos" | "Anúncios" | "Saldo & Limites"> = [
     "Contas",
     "Campanhas",
     "Conjuntos",
     "Anúncios",
+    "Saldo & Limites",
   ];
 
   return (
@@ -402,13 +413,19 @@ function MetaAdsContent() {
             return (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all relative ${
+                onClick={() => {
+                  setActiveTab(tab);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("tab", tab);
+                  window.history.replaceState({}, "", url.toString());
+                }}
+                className={`px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all relative flex items-center gap-1.5 ${
                   isActive
                     ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
+                {tab === "Saldo & Limites" && <Wallet className="w-3.5 h-3.5" />}
                 {tab}
               </button>
             );
@@ -600,6 +617,11 @@ function MetaAdsContent() {
           periodTo={localDate(period.to)}
           periodPreset={period.preset}
         />
+      )}
+
+      {/* Aba SALDO & LIMITES */}
+      {activeTab === "Saldo & Limites" && (
+        <BalanceMonitor selectedAdAccountId={selectedAdAccount} />
       )}
 
       {/* Modal Selecionar Contas */}
