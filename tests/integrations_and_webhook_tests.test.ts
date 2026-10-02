@@ -1,4 +1,4 @@
-﻿import { describe, it } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { prisma } from '../src/lib/db'
 import { getOrCreateWorkspaceIntegrations, rotateIntegrationSecret } from '../src/lib/integrations/service'
@@ -196,6 +196,166 @@ describe('Hub de Integracoes e Testes de Webhooks (Getfy e Kiwify)', () => {
       assert.equal(authResult.status, 200)
       assert.equal(authResult.workspaceId, testWs.id)
     } finally {
+      await prisma.workspace.delete({ where: { id: testWs.id } })
+    }
+  })
+
+  it('Processa webhook Getfy com parcelas de cartao (12x e 1x) e calcula valor liquido correto por taxas', async () => {
+    const testWs = await prisma.workspace.create({
+      data: {
+        name: 'Workspace Getfy Parcelas Teste',
+        slug: `test-getfy-installments-${Date.now()}`
+      }
+    })
+
+    try {
+      const integrations = await getOrCreateWorkspaceIntegrations(testWs.id, 'http://localhost:3000')
+      const getfy = integrations.find(i => i.platform === 'getfy')!
+
+      // Configura regras de taxa: 6% para cartão 1x e 3% para parcelado (2x a 12x)
+      await prisma.fee.createMany({
+        data: [
+          {
+            workspaceId: testWs.id,
+            name: 'Taxa Cartão 1x',
+            type: 'gateway',
+            paymentMethod: 'card_single',
+            percentage: 6.0,
+            fixedAmount: 0,
+            isActive: true,
+          },
+          {
+            workspaceId: testWs.id,
+            name: 'Taxa Cartão Parcelado (2a12x)',
+            type: 'gateway',
+            paymentMethod: 'card_installments',
+            percentage: 3.0,
+            fixedAmount: 0,
+            isActive: true,
+          }
+        ]
+      })
+
+      // Caso 1: Cartão 12x via payment.installments
+      const orderId12x = `test_gt_12x_${Date.now()}`
+      const req12x = new Request(`http://localhost:3000/api/webhooks/getfy?token=${getfy.webhookSecret}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'pedido_pago',
+          payload: {
+            order: {
+              id: orderId12x,
+              status: 'completed',
+              amount: 100.0,
+              currency: 'BRL',
+            },
+            payment: {
+              method: 'card',
+              installments: 12,
+              installments_text: '12x',
+            },
+            amount: 100.0,
+            product: {
+              id: 'prod_12x',
+              name: 'Produto Parcelado 12x'
+            }
+          }
+        })
+      })
+
+      const res12x = await getfyPost(req12x)
+      assert.equal(res12x.status, 200)
+
+      const sale12x = await prisma.sale.findFirst({
+        where: { workspaceId: testWs.id, externalId: orderId12x }
+      })
+      assert.ok(sale12x, 'Venda 12x deve ser registrada')
+      assert.equal(sale12x?.installments, 12, 'Parcelas devem ser 12')
+      assert.equal(sale12x?.paymentMethod, 'card', 'Método de pagamento deve ser card')
+      assert.equal(sale12x?.grossAmount, 100.0)
+      // 3% de 100 = 3 -> líquido 97.00
+      assert.equal(sale12x?.netAmount, 97.0, 'Valor líquido para 12x deve descontar 3% (R$ 97,00)')
+
+      // Caso 2: Cartão 1x via payment.installments_text ("1x")
+      const orderId1x = `test_gt_1x_${Date.now()}`
+      const req1x = new Request(`http://localhost:3000/api/webhooks/getfy?token=${getfy.webhookSecret}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'pedido_pago',
+          payload: {
+            order: {
+              id: orderId1x,
+              status: 'completed',
+              amount: 100.0,
+              currency: 'BRL',
+            },
+            payment: {
+              method: 'card',
+              installments_text: '1x',
+            },
+            amount: 100.0,
+            product: {
+              id: 'prod_1x',
+              name: 'Produto 1x'
+            }
+          }
+        })
+      })
+
+      const res1x = await getfyPost(req1x)
+      assert.equal(res1x.status, 200)
+
+      const sale1x = await prisma.sale.findFirst({
+        where: { workspaceId: testWs.id, externalId: orderId1x }
+      })
+      assert.ok(sale1x, 'Venda 1x deve ser registrada')
+      assert.equal(sale1x?.installments, 1, 'Parcelas devem ser 1')
+      assert.equal(sale1x?.grossAmount, 100.0)
+      // 6% de 100 = 6 -> líquido 94.00
+      assert.equal(sale1x?.netAmount, 94.0, 'Valor líquido para 1x deve descontar 6% (R$ 94,00)')
+
+      // Caso 3: À vista PIX sem campo parcelas -> default 1
+      const orderIdPix = `test_gt_pix_${Date.now()}`
+      const reqPix = new Request(`http://localhost:3000/api/webhooks/getfy?token=${getfy.webhookSecret}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'pedido_pago',
+          payload: {
+            order: {
+              id: orderIdPix,
+              status: 'completed',
+              amount: 50.0,
+              currency: 'BRL',
+            },
+            payment: {
+              method: 'pix',
+            },
+            amount: 50.0,
+            product: {
+              id: 'prod_pix',
+              name: 'Produto Pix'
+            }
+          }
+        })
+      })
+
+      const resPix = await getfyPost(reqPix)
+      assert.equal(resPix.status, 200)
+
+      const salePix = await prisma.sale.findFirst({
+        where: { workspaceId: testWs.id, externalId: orderIdPix }
+      })
+      assert.ok(salePix, 'Venda Pix deve ser registrada')
+      assert.equal(salePix?.installments, 1, 'Parcelas de Pix devem ser 1')
+      assert.equal(salePix?.paymentMethod, 'pix')
+    } finally {
+      await prisma.fee.deleteMany({ where: { workspaceId: testWs.id } })
+      await prisma.sale.deleteMany({ where: { workspaceId: testWs.id } })
+      await prisma.webhookEvent.deleteMany({ where: { workspaceId: testWs.id } })
+      await prisma.integration.deleteMany({ where: { workspaceId: testWs.id } })
       await prisma.workspace.delete({ where: { id: testWs.id } })
     }
   })

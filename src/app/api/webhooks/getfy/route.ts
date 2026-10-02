@@ -14,6 +14,7 @@ import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
 import { claimWebhookEvent } from '@/lib/integrations/webhook-event'
 import { auth } from '@/lib/auth'
 import { getUserWorkspaceId } from '@/lib/workspace'
+import { calculateSaleFee } from '@/lib/calculations/financial-engine'
 
 export async function POST(req: Request) {
   let webhookEventId: string | null = null
@@ -74,10 +75,56 @@ export async function POST(req: Request) {
 
     const status = normalizeSaleStatus(event, 'getfy')
     const grossPrice = normalizeSaleAmount(envelopePayload, 'getfy')
-    const netPrice = normalizeNetAmount(envelopePayload, 'getfy', grossPrice)
     const paymentMethod = normalizeSalePaymentMethod(envelopePayload, 'getfy')
     const utms = normalizeSaleUtms(envelopePayload)
     const currency = String(order.currency || envelopePayload.currency || 'BRL')
+
+    // 1. Extração da quantidade de parcelas no cartão e outros métodos:
+    // Conforme especificação Getfy:
+    // Quando cartão (payment.method === "card"):
+    // - payload.payment.installments (inteiro, ex: 12)
+    // - payload.payment.installments_text (string formatada, ex: "12x")
+    // - payload.installments (inteiro no topo)
+    // À vista (PIX, boleto ou cartão 1x): 1 (ou "1x")
+    const payment = (envelopePayload.payment as Record<string, unknown>) || (rawBody.payment as Record<string, unknown>) || {}
+    const rawInstallments =
+      payment.installments ??
+      payment.installments_text ??
+      envelopePayload.installments ??
+      rawBody.installments ??
+      order.installments ??
+      envelopePayload.order_installments
+
+    let installments = 1
+    if (rawInstallments !== undefined && rawInstallments !== null) {
+      const parsed = parseInt(String(rawInstallments), 10)
+      if (!isNaN(parsed) && parsed > 0) installments = parsed
+    }
+
+    // 2. Cálculo do valor líquido:
+    // Se a plataforma não forneceu valor líquido exclusivo no payload,
+    // calcula com base nas regras de taxas do workspace
+    let netPrice = normalizeNetAmount(envelopePayload, 'getfy', grossPrice)
+
+    const workspaceFees = await prisma.fee.findMany({
+      where: { workspaceId, isActive: true },
+    })
+
+    if (workspaceFees.length > 0 && (netPrice === grossPrice || !envelopePayload.net_amount)) {
+      const fee = calculateSaleFee(
+        {
+          grossAmount: grossPrice,
+          platform: 'getfy',
+          paymentMethod,
+          externalRef: paymentMethod,
+          installments,
+        },
+        workspaceFees
+      )
+      if (fee > 0) {
+        netPrice = Math.max(0, Math.round((grossPrice - fee) * 100) / 100)
+      }
+    }
 
     const idempotencyKey = `getfy_${workspaceId}_${orderId}_${status}`
     const claim = await claimWebhookEvent({
@@ -108,7 +155,7 @@ export async function POST(req: Request) {
       externalId: orderId,
       externalRef: paymentMethod,
       paymentMethod,
-      installments: normalizeSaleInstallments(envelopePayload, 'getfy'),
+      installments,
       status,
       grossAmount: grossPrice,
       netAmount: netPrice,
@@ -142,8 +189,10 @@ export async function POST(req: Request) {
           saleId: sale.id,
           orderId,
           status,
+          installments,
+          paymentMethod,
           grossAmount: grossPrice,
-          netAmount: netPrice,
+          netAmount: sale.netAmount,
           capi: sale.capiResult
         })
       }

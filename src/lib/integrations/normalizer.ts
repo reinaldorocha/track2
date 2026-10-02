@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { attemptAttribution } from '@/lib/tracking/attribution'
 import { dispatchPurchaseToCapi } from '@/lib/meta/capi-service'
+import { calculateSaleFee } from '@/lib/calculations/financial-engine'
 
 export interface InternalSale {
   workspaceId: string
@@ -487,18 +488,20 @@ export function normalizeSaleInstallments(payload: Record<string, unknown>, _pro
   const order = (payload.order as Record<string, unknown>) || (payload.Order as Record<string, unknown>) || {}
 
   const rawInstallments =
+    payment.installments ??
+    payment.installments_text ??
     payload.installments ??
+    order.installments ??
     data.installments ??
     purchase.installments_number ??
     purchase.recurrence_number ??
     payment.installments_number ??
-    payment.installments ??
-    order.installments ??
     resource.installments ??
     payload.order_installments
 
   if (rawInstallments !== undefined && rawInstallments !== null) {
-    const parsed = parseInt(String(rawInstallments), 10)
+    const str = String(rawInstallments).trim()
+    const parsed = parseInt(str, 10)
     if (!isNaN(parsed) && parsed > 0) return parsed
   }
 
@@ -568,6 +571,33 @@ export async function upsertSale(sale: InternalSale) {
     }
   }
 
+  // Se o valor líquido não foi definido ou ficou igual ao bruto por ausência de dado da plataforma, calcula via taxas ativas (Fee)
+  let resolvedNet = sale.netAmount
+  if (resolvedNet === undefined || resolvedNet === null || (resolvedNet === sale.grossAmount && sale.grossAmount > 0)) {
+    try {
+      const activeFees = await prisma.fee.findMany({
+        where: { workspaceId: sale.workspaceId, isActive: true }
+      })
+      if (activeFees.length > 0) {
+        const fee = calculateSaleFee(
+          {
+            grossAmount: sale.grossAmount,
+            platform: sale.platform,
+            paymentMethod: sale.paymentMethod,
+            externalRef: sale.externalRef,
+            installments: sale.installments
+          },
+          activeFees
+        )
+        if (fee > 0) {
+          resolvedNet = Math.max(0, Math.round((sale.grossAmount - fee) * 100) / 100)
+        }
+      }
+    } catch (e) {
+      console.error('[upsertSale] Error calculating fee for netAmount:', e)
+    }
+  }
+
   const result = await prisma.sale.upsert({
     where: { 
       workspaceId_platform_externalId: { 
@@ -585,7 +615,7 @@ export async function upsertSale(sale: InternalSale) {
       installments: sale.installments || 1,
       status: sale.status,
       grossAmount: sale.grossAmount,
-      netAmount: sale.netAmount,
+      netAmount: resolvedNet ?? sale.grossAmount,
       currency: sale.currency,
       customerEmail: sale.customerEmail,
       utmSource: sale.utmSource,
@@ -606,7 +636,7 @@ export async function upsertSale(sale: InternalSale) {
       paymentMethod: sale.paymentMethod || sale.externalRef || undefined,
       installments: sale.installments || undefined,
       grossAmount: sale.grossAmount,
-      netAmount: sale.netAmount,
+      netAmount: resolvedNet ?? sale.grossAmount,
       currency: sale.currency,
       approvedAt: sale.approvedAt, 
       refundedAt: sale.refundedAt, 

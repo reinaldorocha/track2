@@ -23,6 +23,8 @@ import {
   AlertTriangle,
   Upload,
   FileSpreadsheet,
+  CreditCard,
+  FileText,
 } from "lucide-react";
 import { formatCurrency, formatDateTime, getDateRange } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
@@ -37,6 +39,8 @@ type SaleItem = {
   externalId: string;
   externalRef?: string;
   status: "approved" | "pending" | "refunded" | "chargeback" | "cancelled";
+  paymentMethod?: string;
+  installments?: number;
   grossAmount: number;
   netAmount: number;
   currency: string;
@@ -228,6 +232,47 @@ export default function SalesPage() {
           </span>
         );
     }
+  };
+
+  const getPaymentMethodBadge = (method?: string, installments?: number) => {
+    if (!method) {
+      return <span className="text-gray-400 text-xs">—</span>;
+    }
+    const m = method.toLowerCase();
+
+    if (m.includes("pix")) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          Pix
+        </span>
+      );
+    }
+
+    if (m.includes("card") || m.includes("cart") || m.includes("cred")) {
+      const instCount = installments && installments > 0 ? installments : 1;
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+          <CreditCard className="w-3 h-3 text-blue-500" />
+          Cartão ({instCount}x)
+        </span>
+      );
+    }
+
+    if (m.includes("boleto") || m.includes("bank_slip") || m.includes("billet")) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/40">
+          <FileText className="w-3 h-3 text-amber-500" />
+          Boleto
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+        {method}
+      </span>
+    );
   };
 
   return (
@@ -500,6 +545,7 @@ export default function SalesPage() {
                 <th className="p-3.5">Data / Hora</th>
                 <th className="p-3.5">Plataforma</th>
                 <th className="p-3.5">ID Pedido / Transação</th>
+                <th className="p-3.5">Forma de Pagamento</th>
                 <th className="p-3.5">Valor Bruto</th>
                 <th className="p-3.5">Valor Líquido</th>
                 <th className="p-3.5">UTM Campanha</th>
@@ -510,7 +556,7 @@ export default function SalesPage() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="p-8 text-center text-gray-400">
+                  <td colSpan={11} className="p-8 text-center text-gray-400">
                     <div className="animate-pulse space-y-2">
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/3 mx-auto" />
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/2 mx-auto" />
@@ -519,7 +565,7 @@ export default function SalesPage() {
                 </tr>
               ) : !data?.sales || data.sales.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-12 text-center text-gray-500">
+                  <td colSpan={11} className="p-12 text-center text-gray-500">
                     <ShoppingBag className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
                     <p className="font-semibold text-gray-700 dark:text-gray-300">Nenhuma venda encontrada</p>
                     <p className="text-xs text-gray-400 mt-1">
@@ -557,6 +603,9 @@ export default function SalesPage() {
                       </td>
                       <td className="p-3.5 font-mono text-xs text-gray-900 dark:text-white font-medium">
                         {sale.externalId}
+                      </td>
+                      <td className="p-3.5">
+                        {getPaymentMethodBadge(sale.paymentMethod, sale.installments)}
                       </td>
                       <td className="p-3.5 font-semibold text-gray-900 dark:text-white">
                         {formatCurrency(sale.grossAmount, sale.currency)}
@@ -639,7 +688,7 @@ export default function SalesPage() {
             </div>
 
             {/* Financial Details */}
-            <div className="grid grid-cols-3 gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800 text-xs">
               <div>
                 <span className="text-gray-500">Valor Bruto:</span>
                 <p className="text-base font-bold text-gray-900 dark:text-white mt-0.5">
@@ -657,6 +706,12 @@ export default function SalesPage() {
                 <p className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {formatCurrency(selectedSale.netAmount, selectedSale.currency)}
                 </p>
+              </div>
+              <div>
+                <span className="text-gray-500">Forma de Pagto:</span>
+                <div className="mt-1">
+                  {getPaymentMethodBadge(selectedSale.paymentMethod, selectedSale.installments)}
+                </div>
               </div>
             </div>
 

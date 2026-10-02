@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
 import { purgeTestSales } from '@/lib/integrations/normalizer'
 import { resolveAnalyticsInterval } from '@/lib/meta/insight-helpers'
+import { calculateSaleFee } from '@/lib/calculations/financial-engine'
 
 export async function GET(req: Request) {
   try {
@@ -89,12 +90,49 @@ export async function GET(req: Request) {
       prisma.sale.findMany({
         where: statsWhere,
         select: {
+          id: true,
           status: true,
           grossAmount: true,
           netAmount: true,
+          platform: true,
+          paymentMethod: true,
+          externalRef: true,
+          installments: true,
         },
       }),
     ])
+
+    // Busca taxas ativas para garantir cálculo correto do líquido
+    const activeFees = await prisma.fee.findMany({
+      where: { workspaceId, isActive: true },
+    })
+
+    const calculateRealNet = (s: {
+      grossAmount: number
+      netAmount: number
+      platform?: string | null
+      paymentMethod?: string | null
+      externalRef?: string | null
+      installments?: number | null
+    }) => {
+      let net = s.netAmount
+      if ((net === s.grossAmount || net === 0) && activeFees.length > 0 && s.grossAmount > 0) {
+        const fee = calculateSaleFee(
+          {
+            grossAmount: s.grossAmount,
+            platform: s.platform,
+            paymentMethod: s.paymentMethod,
+            externalRef: s.externalRef,
+            installments: s.installments,
+          },
+          activeFees
+        )
+        if (fee > 0) {
+          net = Math.max(0, Math.round((s.grossAmount - fee) * 100) / 100)
+        }
+      }
+      return net
+    }
 
     // Compute KPI metrics across the entire workspace
     let totalGross = 0
@@ -108,9 +146,10 @@ export async function GET(req: Request) {
     let countChargeback = 0
 
     for (const s of allStatusSales) {
+      const realNet = calculateRealNet(s)
       if (s.status === 'approved') {
         totalGross += s.grossAmount
-        totalNet += s.netAmount
+        totalNet += realNet
         countApproved++
       } else if (s.status === 'pending') {
         totalPending += s.grossAmount
@@ -124,11 +163,33 @@ export async function GET(req: Request) {
       }
     }
 
+    const enrichedSales = sales.map((s) => ({
+      ...s,
+      netAmount: calculateRealNet(s),
+    }))
+
+    // Background update de vendas legadas para manter banco consistente
+    const salesToUpdate = enrichedSales.filter(
+      (s, idx) => s.netAmount !== sales[idx]?.netAmount
+    )
+    if (salesToUpdate.length > 0) {
+      Promise.all(
+        salesToUpdate.map((s) =>
+          prisma.sale
+            .update({
+              where: { id: s.id },
+              data: { netAmount: s.netAmount },
+            })
+            .catch(() => {})
+        )
+      ).catch(() => {})
+    }
+
     const countTotal = allStatusSales.length
     const approvalRate = countTotal > 0 ? (countApproved / countTotal) * 100 : 0
 
     return NextResponse.json({
-      sales,
+      sales: enrichedSales,
       totalCount,
       page,
       totalPages: Math.ceil(totalCount / limit) || 1,

@@ -117,16 +117,28 @@ export function calculateSaleFee(sale: SaleFinancialInput, fees: FeeRule[]): num
   const instCount = sale.installments && sale.installments > 0 ? sale.installments : 1
 
   // Procura regra por prioridade de especificidade:
-  // 1. Plataforma específica + Método específico (ex: getfy + pix)
-  // 2. Plataforma específica + Método geral ('all' ou vazio)
-  // 3. Plataforma geral + Método específico (ex: todas + pix)
-  // 4. Plataforma geral + Método geral
+  // 1. Plataforma específica + Método exato (ex: getfy + card_single ou getfy + card_installments)
   let matchingRule = activeFees.find(f => {
     const fPlat = (f.platform || '').toLowerCase().trim()
     const fMethod = (f.paymentMethod || '').toLowerCase().trim()
     return fPlat && fPlat === platform && fMethod === method
   })
 
+  // 1.1 Plataforma específica + Método genérico 'card'/'cartao' se for cartão
+  if (!matchingRule && (method === 'card_single' || method === 'card_installments')) {
+    matchingRule = activeFees.find(f => {
+      const fPlat = (f.platform || '').toLowerCase().trim()
+      const fMethod = (f.paymentMethod || '').toLowerCase().trim()
+      const fName = (f.name || '').toLowerCase()
+      if (fPlat !== platform) return false
+      if (fMethod === 'card' || fMethod === 'cartao' || fMethod === 'credito') return true
+      if (method === 'card_single' && (fName.includes('1x') || fName.includes('vista'))) return true
+      if (method === 'card_installments' && (fName.includes('parcelad') || fName.includes('2x') || fName.includes('2a'))) return true
+      return false
+    })
+  }
+
+  // 2. Plataforma específica + Método geral ('all' ou vazio)
   if (!matchingRule) {
     matchingRule = activeFees.find(f => {
       const fPlat = (f.platform || '').toLowerCase().trim()
@@ -135,6 +147,7 @@ export function calculateSaleFee(sale: SaleFinancialInput, fees: FeeRule[]): num
     })
   }
 
+  // 3. Plataforma geral + Método exato (ex: todas + card_single ou todas + card_installments)
   if (!matchingRule) {
     matchingRule = activeFees.find(f => {
       const fPlat = (f.platform || '').toLowerCase().trim()
@@ -143,6 +156,21 @@ export function calculateSaleFee(sale: SaleFinancialInput, fees: FeeRule[]): num
     })
   }
 
+  // 3.1 Plataforma geral + Método genérico 'card'/'cartao' se for cartão
+  if (!matchingRule && (method === 'card_single' || method === 'card_installments')) {
+    matchingRule = activeFees.find(f => {
+      const fPlat = (f.platform || '').toLowerCase().trim()
+      const fMethod = (f.paymentMethod || '').toLowerCase().trim()
+      const fName = (f.name || '').toLowerCase()
+      if (fPlat && fPlat !== 'all') return false
+      if (fMethod === 'card' || fMethod === 'cartao' || fMethod === 'credito') return true
+      if (method === 'card_single' && (fName.includes('1x') || fName.includes('vista'))) return true
+      if (method === 'card_installments' && (fName.includes('parcelad') || fName.includes('2x') || fName.includes('2a'))) return true
+      return false
+    })
+  }
+
+  // 4. Plataforma geral + Método geral ('all' ou vazio)
   if (!matchingRule) {
     matchingRule = activeFees.find(f => {
       const fPlat = (f.platform || '').toLowerCase().trim()
