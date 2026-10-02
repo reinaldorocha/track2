@@ -18,10 +18,12 @@ import {
   Share2,
   Trash2,
   AlertTriangle,
+  Pencil,
 } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
 import { playNotificationSound, SoundType } from "@/lib/sound";
+import { EditSaleModal } from "@/components/sales/edit-sale-modal";
 
 export default function SaleDetailPage({
   params,
@@ -32,6 +34,7 @@ export default function SaleDetailPage({
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["sale-detail", id],
@@ -143,6 +146,12 @@ export default function SaleDetailPage({
           <ArrowLeft className="w-4 h-4" /> Voltar para Lista de Vendas
         </Link>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsEditModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 dark:bg-blue-950/50 text-[#0066FF] dark:text-[#00D4FF] border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition"
+          >
+            <Pencil className="w-4 h-4" /> Editar Venda
+          </button>
           <button
             onClick={() => playNotificationSound(getSoundForStatus(sale.status))}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-50 dark:bg-sky-950/50 text-[#0066FF] dark:text-[#00D4FF] border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition"
@@ -342,6 +351,18 @@ export default function SaleDetailPage({
           </div>
         </div>
       )}
+
+      {/* Modal de Edição de Venda */}
+      <EditSaleModal
+        isOpen={isEditModalOpen}
+        sale={sale}
+        onClose={() => setIsEditModalOpen(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["sale-detail", id] });
+          queryClient.invalidateQueries({ queryKey: ["sales-list"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+        }}
+      />
     </div>
   );
 }

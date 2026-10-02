@@ -25,12 +25,14 @@ import {
   FileSpreadsheet,
   CreditCard,
   FileText,
+  Pencil,
 } from "lucide-react";
 import { formatCurrency, formatDateTime, getDateRange } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
 import { playNotificationSound, SoundType } from "@/lib/sound";
 import { HourlySalesBreakdown } from "@/components/sales/hourly-sales-breakdown";
 import { ImportSalesModal } from "@/components/sales/import-sales-modal";
+import { EditSaleModal } from "@/components/sales/edit-sale-modal";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
 
 type SaleItem = {
@@ -99,6 +101,9 @@ export default function SalesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [saleToDelete, setSaleToDelete] = useState<SaleItem | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+
+  // Estado para edição de venda
+  const [saleToEdit, setSaleToEdit] = useState<SaleItem | null>(null);
 
   // Filtro por dia (padrão "hoje")
   const [period, setPeriod] = useState({
@@ -645,6 +650,13 @@ export default function SalesPage() {
                             Detalhes
                           </button>
                           <button
+                            onClick={() => setSaleToEdit(sale)}
+                            className="p-1 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded transition"
+                            title="Editar Venda"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
                             onClick={() => setSaleToDelete(sale)}
                             className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded transition"
                             title="Excluir Venda"
@@ -679,12 +691,26 @@ export default function SalesPage() {
                   ID Interno: {selectedSale.id} | Plataforma: {selectedSale.platform.toUpperCase()}
                 </p>
               </div>
-              <button
-                onClick={() => setSelectedSale(null)}
-                className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const toEdit = selectedSale;
+                    setSelectedSale(null);
+                    setSaleToEdit(toEdit);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition"
+                  title="Editar dados desta venda"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Editar</span>
+                </button>
+                <button
+                  onClick={() => setSelectedSale(null)}
+                  className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Financial Details */}
@@ -897,6 +923,18 @@ export default function SalesPage() {
       <ImportSalesModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
+      />
+
+      {/* Modal de Edição de Venda */}
+      <EditSaleModal
+        isOpen={Boolean(saleToEdit)}
+        sale={saleToEdit}
+        onClose={() => setSaleToEdit(null)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["sales-list"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+          queryClient.invalidateQueries({ queryKey: ["financial-summary"] });
+        }}
       />
     </div>
   );
