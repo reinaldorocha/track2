@@ -4,24 +4,14 @@ import { prisma } from '@/lib/db'
 import { getUserWorkspaceId } from '@/lib/workspace'
 import { calculateSaleFee } from '@/lib/calculations/financial-engine'
 
-async function getAuthenticatedUserId(req: Request): Promise<string | null> {
-  const testUserId = req.headers.get('x-test-user-id')
-  if (testUserId) return testUserId
-
-  try {
-    const session = await auth()
-    return session?.user?.id || null
-  } catch {
-    return null
-  }
-}
-
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await getAuthenticatedUserId(req)
+    const testUserId = req.headers.get('x-test-user-id')
+    const session = testUserId ? null : await auth()
+    const userId = testUserId || session?.user?.id
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -41,6 +31,11 @@ export async function GET(
         },
         include: {
           attributionRecord: true,
+          items: {
+            include: {
+              product: true,
+            },
+          },
         },
       }),
       prisma.notification.findMany({
@@ -91,12 +86,111 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const testUserId = req.headers.get('x-test-user-id')
+    const session = testUserId ? null : await auth()
+    const userId = testUserId || session?.user?.id
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const workspaceId = await getUserWorkspaceId(userId)
+    if (!workspaceId) {
+      return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
+    }
+
+    const { id } = await params
+    const sale = await prisma.sale.findFirst({
+      where: { id, workspaceId }
+    })
+
+    if (!sale) {
+      return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
+    }
+
+    const body = await req.json()
+    const {
+      grossAmount,
+      netAmount,
+      status,
+      paymentMethod,
+      installments,
+      externalId,
+      utmCampaign,
+      customerEmail,
+      recalculateNet
+    } = body
+
+    const finalGross = typeof grossAmount === 'number' ? grossAmount : sale.grossAmount
+    const finalPlatform = sale.platform
+    const finalPaymentMethod = paymentMethod !== undefined ? paymentMethod : sale.paymentMethod
+    const finalInstallments = installments !== undefined ? installments : sale.installments
+    const finalExternalRef = sale.externalRef
+
+    let finalNet = typeof netAmount === 'number' ? netAmount : sale.netAmount
+
+    if (recalculateNet) {
+      const activeFees = await prisma.fee.findMany({
+        where: { workspaceId, isActive: true }
+      })
+      const fee = calculateSaleFee(
+        {
+          grossAmount: finalGross,
+          platform: finalPlatform,
+          paymentMethod: finalPaymentMethod,
+          externalRef: finalExternalRef,
+          installments: finalInstallments,
+        },
+        activeFees
+      )
+      finalNet = Math.max(0, Math.round((finalGross - fee) * 100) / 100)
+    }
+
+    const dataToUpdate: any = {}
+    if (grossAmount !== undefined) dataToUpdate.grossAmount = finalGross
+    if (finalNet !== undefined) dataToUpdate.netAmount = finalNet
+    if (status !== undefined) dataToUpdate.status = status
+    if (paymentMethod !== undefined) dataToUpdate.paymentMethod = paymentMethod
+    if (installments !== undefined) dataToUpdate.installments = installments
+    if (externalId !== undefined) dataToUpdate.externalId = externalId
+    if (utmCampaign !== undefined) dataToUpdate.utmCampaign = utmCampaign
+    if (customerEmail !== undefined) dataToUpdate.customerEmail = customerEmail
+
+    const updatedSale = await prisma.sale.update({
+      where: { id },
+      data: dataToUpdate
+    })
+
+    // Sincroniza valor na notificação se houve alteração de valor bruto
+    if (grossAmount !== undefined) {
+      await prisma.notification.updateMany({
+        where: { saleId: id },
+        data: { amount: finalGross }
+      })
+    }
+
+    return NextResponse.json({
+      success: true,
+      sale: updatedSale
+    })
+  } catch (error) {
+    console.error('Error updating sale:', error)
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+  }
+}
+
 export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = await getAuthenticatedUserId(req)
+    const testUserId = req.headers.get('x-test-user-id')
+    const session = testUserId ? null : await auth()
+    const userId = testUserId || session?.user?.id
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -138,148 +232,6 @@ export async function DELETE(
     })
   } catch (error) {
     console.error('Error deleting sale:', error)
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
-  }
-}
-
-export async function PATCH(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const userId = await getAuthenticatedUserId(req)
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const workspaceId = await getUserWorkspaceId(userId)
-    if (!workspaceId) {
-      return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
-    }
-
-    const { id } = await params
-    const body = await req.json()
-
-    const existingSale = await prisma.sale.findFirst({
-      where: {
-        id,
-        workspaceId,
-      },
-    })
-
-    if (!existingSale) {
-      return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
-    }
-
-    const dataToUpdate: Record<string, any> = {}
-
-    if (body.grossAmount !== undefined && body.grossAmount !== null && body.grossAmount !== '') {
-      const parsedGross = typeof body.grossAmount === 'string'
-        ? parseFloat(body.grossAmount.replace(',', '.'))
-        : Number(body.grossAmount)
-      if (!isNaN(parsedGross) && parsedGross >= 0) {
-        dataToUpdate.grossAmount = Math.round(parsedGross * 100) / 100
-      }
-    }
-
-    if (body.netAmount !== undefined && body.netAmount !== null && body.netAmount !== '') {
-      const parsedNet = typeof body.netAmount === 'string'
-        ? parseFloat(body.netAmount.replace(',', '.'))
-        : Number(body.netAmount)
-      if (!isNaN(parsedNet) && parsedNet >= 0) {
-        dataToUpdate.netAmount = Math.round(parsedNet * 100) / 100
-      }
-    }
-
-    if (body.status !== undefined && body.status) {
-      const validStatuses = ['approved', 'pending', 'refunded', 'chargeback', 'cancelled']
-      if (validStatuses.includes(body.status)) {
-        dataToUpdate.status = body.status
-      }
-    }
-
-    if (body.paymentMethod !== undefined) {
-      dataToUpdate.paymentMethod = body.paymentMethod ? String(body.paymentMethod).trim() : null
-    }
-
-    if (body.installments !== undefined && body.installments !== null && body.installments !== '') {
-      const parsedInst = parseInt(String(body.installments), 10)
-      if (!isNaN(parsedInst) && parsedInst >= 1) {
-        dataToUpdate.installments = parsedInst
-      }
-    }
-
-    if (body.externalId !== undefined && body.externalId) {
-      dataToUpdate.externalId = String(body.externalId).trim()
-    }
-
-    if (body.externalRef !== undefined) {
-      dataToUpdate.externalRef = body.externalRef ? String(body.externalRef).trim() : null
-    }
-
-    if (body.utmCampaign !== undefined) {
-      dataToUpdate.utmCampaign = body.utmCampaign ? String(body.utmCampaign).trim() : null
-    }
-    if (body.utmSource !== undefined) {
-      dataToUpdate.utmSource = body.utmSource ? String(body.utmSource).trim() : null
-    }
-    if (body.utmMedium !== undefined) {
-      dataToUpdate.utmMedium = body.utmMedium ? String(body.utmMedium).trim() : null
-    }
-    if (body.utmContent !== undefined) {
-      dataToUpdate.utmContent = body.utmContent ? String(body.utmContent).trim() : null
-    }
-    if (body.utmTerm !== undefined) {
-      dataToUpdate.utmTerm = body.utmTerm ? String(body.utmTerm).trim() : null
-    }
-    if (body.customerEmail !== undefined) {
-      dataToUpdate.customerEmail = body.customerEmail ? String(body.customerEmail).trim().toLowerCase() : null
-    }
-
-    // Se solicitado recálculo do líquido pelas taxas ou se o bruto mudou e o líquido não foi explicitado
-    if (body.recalculateNet || (dataToUpdate.grossAmount !== undefined && dataToUpdate.netAmount === undefined)) {
-      const activeFees = await prisma.fee.findMany({
-        where: { workspaceId, isActive: true },
-      })
-      const gross = dataToUpdate.grossAmount ?? existingSale.grossAmount
-      const fee = calculateSaleFee(
-        {
-          grossAmount: gross,
-          platform: existingSale.platform,
-          paymentMethod: dataToUpdate.paymentMethod !== undefined ? dataToUpdate.paymentMethod : existingSale.paymentMethod,
-          externalRef: dataToUpdate.externalRef !== undefined ? dataToUpdate.externalRef : existingSale.externalRef,
-          installments: dataToUpdate.installments !== undefined ? dataToUpdate.installments : existingSale.installments,
-        },
-        activeFees
-      )
-      dataToUpdate.netAmount = Math.max(0, Math.round((gross - fee) * 100) / 100)
-    }
-
-    const updatedSale = await prisma.sale.update({
-      where: { id },
-      data: dataToUpdate,
-      include: {
-        attributionRecord: true,
-      },
-    })
-
-    // Sincroniza notificação se o valor foi alterado
-    if (dataToUpdate.grossAmount !== undefined) {
-      await prisma.notification.updateMany({
-        where: { saleId: id, workspaceId },
-        data: {
-          amount: dataToUpdate.grossAmount,
-        },
-      }).catch(() => {})
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: 'Venda atualizada com sucesso',
-      sale: updatedSale,
-    })
-  } catch (error) {
-    console.error('Error updating sale:', error)
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }

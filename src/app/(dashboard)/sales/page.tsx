@@ -26,6 +26,8 @@ import {
   CreditCard,
   FileText,
   Pencil,
+  Package,
+  Zap,
 } from "lucide-react";
 import { formatCurrency, formatDateTime, getDateRange } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
@@ -34,6 +36,16 @@ import { HourlySalesBreakdown } from "@/components/sales/hourly-sales-breakdown"
 import { ImportSalesModal } from "@/components/sales/import-sales-modal";
 import { EditSaleModal } from "@/components/sales/edit-sale-modal";
 import { PeriodSelector } from "@/components/dashboard/period-selector";
+
+type SaleProductItem = {
+  id: string;
+  name: string;
+  quantity?: number;
+  unitPrice?: number;
+  totalPrice?: number;
+  sku?: string | null;
+  product?: { name: string } | null;
+};
 
 type SaleItem = {
   id: string;
@@ -59,6 +71,7 @@ type SaleItem = {
   orderedAt: string;
   approvedAt?: string;
   refundedAt?: string;
+  items?: SaleProductItem[];
   attributionRecord?: {
     id: string;
     campaignId?: string;
@@ -550,6 +563,7 @@ export default function SalesPage() {
                 <th className="p-3.5">Data / Hora</th>
                 <th className="p-3.5">Plataforma</th>
                 <th className="p-3.5">ID Pedido / Transação</th>
+                <th className="p-3.5">Produto</th>
                 <th className="p-3.5">Forma de Pagamento</th>
                 <th className="p-3.5">Valor Bruto</th>
                 <th className="p-3.5">Valor Líquido</th>
@@ -561,7 +575,7 @@ export default function SalesPage() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={11} className="p-8 text-center text-gray-400">
+                  <td colSpan={12} className="p-8 text-center text-gray-400">
                     <div className="animate-pulse space-y-2">
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/3 mx-auto" />
                       <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-1/2 mx-auto" />
@@ -570,7 +584,7 @@ export default function SalesPage() {
                 </tr>
               ) : !data?.sales || data.sales.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="p-12 text-center text-gray-500">
+                  <td colSpan={12} className="p-12 text-center text-gray-500">
                     <ShoppingBag className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
                     <p className="font-semibold text-gray-700 dark:text-gray-300">Nenhuma venda encontrada</p>
                     <p className="text-xs text-gray-400 mt-1">
@@ -582,6 +596,8 @@ export default function SalesPage() {
                 data.sales.map((sale) => {
                   const attribution = sale.attributionRecord;
                   const isSelected = selectedIds.includes(sale.id);
+                  const mainProduct = sale.items?.[0]?.name || "Produto Principal";
+                  const bumpsCount = (sale.items?.length || 0) > 1 ? (sale.items!.length - 1) : 0;
                   return (
                     <tr
                       key={sale.id}
@@ -608,6 +624,22 @@ export default function SalesPage() {
                       </td>
                       <td className="p-3.5 font-mono text-xs text-gray-900 dark:text-white font-medium">
                         {sale.externalId}
+                      </td>
+                      <td className="p-3.5 max-w-[200px]">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-gray-900 dark:text-white truncate" title={mainProduct}>
+                            {mainProduct}
+                          </span>
+                          {bumpsCount > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 shrink-0 cursor-help"
+                              title={sale.items?.slice(1).map(b => `${b.name} (${formatCurrency(b.totalPrice ?? b.unitPrice ?? 0, sale.currency)})`).join("\n")}
+                            >
+                              <Zap className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
+                              +{bumpsCount} Bump{bumpsCount > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3.5">
                         {getPaymentMethodBadge(sale.paymentMethod, sale.installments)}
@@ -739,6 +771,93 @@ export default function SalesPage() {
                   {getPaymentMethodBadge(selectedSale.paymentMethod, selectedSale.installments)}
                 </div>
               </div>
+            </div>
+
+            {/* Order Items & Order Bumps */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+                  <ShoppingBag className="w-3.5 h-3.5 text-indigo-500" />
+                  Itens do Pedido (Produto &amp; Order Bumps)
+                </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40">
+                  {selectedSale.items && selectedSale.items.length > 0 ? `${selectedSale.items.length} ${selectedSale.items.length === 1 ? 'item' : 'itens'}` : "1 item"}
+                </span>
+              </div>
+
+              <div className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-500 text-[10px] font-bold uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                    <tr>
+                      <th className="py-2 px-3">Tipo</th>
+                      <th className="py-2 px-3">Produto</th>
+                      <th className="py-2 px-3 text-center">Qtd</th>
+                      <th className="py-2 px-3 text-right">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
+                    {selectedSale.items && selectedSale.items.length > 0 ? (
+                      selectedSale.items.map((item, idx) => {
+                        const isBump = idx > 0;
+                        return (
+                          <tr key={item.id || idx} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
+                            <td className="py-2.5 px-3">
+                              {isBump ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                  <Zap className="w-2.5 h-2.5 fill-amber-500 text-amber-500" /> Bump
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                  <Package className="w-2.5 h-2.5 text-blue-500" /> Principal
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-gray-900 dark:text-white">
+                              {item.name || (isBump ? "Order Bump" : "Produto Principal")}
+                            </td>
+                            <td className="py-2.5 px-3 text-center font-medium text-gray-600 dark:text-gray-400">
+                              {item.quantity || 1}x
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white">
+                              {formatCurrency(item.totalPrice ?? item.unitPrice ?? 0, selectedSale.currency)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td className="py-2.5 px-3">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            <Package className="w-2.5 h-2.5 text-blue-500" /> Principal
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-semibold text-gray-900 dark:text-white">
+                          Produto Principal
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-medium text-gray-600 dark:text-gray-400">
+                          1x
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-gray-900 dark:text-white">
+                          {formatCurrency(selectedSale.grossAmount, selectedSale.currency)}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {selectedSale.items && selectedSale.items.length > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-gray-50 dark:bg-gray-800/40 p-2.5 rounded-xl border border-gray-100 dark:border-gray-800">
+                  <span className="text-gray-500">
+                    Principal: <strong>{formatCurrency(selectedSale.items[0]?.totalPrice ?? 0, selectedSale.currency)}</strong>
+                    {" + "}
+                    Order Bumps: <strong className="text-amber-600 dark:text-amber-400">+{formatCurrency(selectedSale.items.slice(1).reduce((acc, it) => acc + (it.totalPrice || 0), 0), selectedSale.currency)}</strong>
+                  </span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                    Total: {formatCurrency(selectedSale.grossAmount, selectedSale.currency)}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Attribution Details */}

@@ -459,7 +459,7 @@ export async function GET(req: Request) {
       percentage: grossRevenue > 0 ? (data.revenue / grossRevenue) * 100 : 0
     }))
 
-    // 11. Vendas e Faturamento por Produto (Ranking de Produtos)
+    // 11. Vendas e Faturamento por Produto (Ranking de Produtos & Order Bumps)
     const productMap = new Map<string, { id: string; name: string; salesCount: number; grossRevenue: number; netRevenue: number }>()
     for (const s of approvedSales) {
       if (s.items && s.items.length > 0) {
@@ -467,8 +467,10 @@ export async function GET(req: Request) {
           const prodKey = it.name || 'Produto Principal'
           const existing = productMap.get(prodKey) || { id: it.productId || it.id || prodKey, name: prodKey, salesCount: 0, grossRevenue: 0, netRevenue: 0 }
           existing.salesCount += it.quantity || 1
-          existing.grossRevenue += it.totalPrice || s.grossAmount
-          existing.netRevenue += (it.totalPrice || s.netAmount || s.grossAmount)
+          const itemGross = it.totalPrice ?? (s.items.length > 0 ? s.grossAmount / s.items.length : s.grossAmount)
+          const itemNet = s.grossAmount > 0 ? (itemGross / s.grossAmount) * s.netAmount : (s.netAmount || itemGross)
+          existing.grossRevenue += itemGross
+          existing.netRevenue += itemNet
           productMap.set(prodKey, existing)
         }
       } else {
@@ -482,6 +484,8 @@ export async function GET(req: Request) {
     }
     const productDistribution = Array.from(productMap.values()).map(p => ({
       ...p,
+      grossRevenue: Math.round(p.grossRevenue * 100) / 100,
+      netRevenue: Math.round(p.netRevenue * 100) / 100,
       avgTicket: p.salesCount > 0 ? Number((p.grossRevenue / p.salesCount).toFixed(2)) : 0,
       percentage: grossRevenue > 0 ? Number(((p.grossRevenue / grossRevenue) * 100).toFixed(2)) : 0
     })).sort((a, b) => b.grossRevenue - a.grossRevenue)

@@ -36,6 +36,17 @@ export interface InternalSale {
     name?: string
     sku?: string
   }
+  items?: InternalSaleItem[]
+}
+
+export interface InternalSaleItem {
+  id?: string | number
+  name: string
+  sku?: string
+  quantity?: number
+  unitPrice?: number
+  totalPrice?: number
+  isOrderBump?: boolean
 }
 
 /**
@@ -655,7 +666,91 @@ export async function upsertSale(sale: InternalSale) {
 
   // Upsert de Produto e SaleItem quando informados
   let resolvedProductId: string | undefined = undefined
-  if (sale.productInfo?.name) {
+  if (sale.items && sale.items.length > 0) {
+    try {
+      // Limpa itens anteriores desta venda para garantir idempotência em reprocessamentos
+      await prisma.saleItem.deleteMany({
+        where: { saleId: result.id }
+      })
+
+      for (let i = 0; i < sale.items.length; i++) {
+        const item = sale.items[i]
+        let itemProductId: string | undefined = undefined
+
+        if (item.name) {
+          const extProdId = item.id ? String(item.id) : undefined
+          let product = null
+
+          if (extProdId) {
+            product = await prisma.product.findFirst({
+              where: {
+                workspaceId: sale.workspaceId,
+                platform: sale.platform,
+                externalId: extProdId
+              }
+            })
+          }
+
+          if (!product) {
+            product = await prisma.product.findFirst({
+              where: {
+                workspaceId: sale.workspaceId,
+                name: item.name
+              }
+            })
+          }
+
+          if (!product) {
+            product = await prisma.product.create({
+              data: {
+                workspaceId: sale.workspaceId,
+                platform: sale.platform,
+                externalId: extProdId,
+                name: String(item.name),
+                sku: item.sku,
+                price: item.unitPrice ?? item.totalPrice ?? 0,
+                currency: sale.currency
+              }
+            })
+          } else {
+            if ((!product.price || product.price === 0) && (item.unitPrice || item.totalPrice)) {
+              product = await prisma.product.update({
+                where: { id: product.id },
+                data: {
+                  price: item.unitPrice ?? item.totalPrice ?? 0,
+                  updatedAt: new Date()
+                }
+              })
+            }
+          }
+
+          itemProductId = product.id
+          if (i === 0) {
+            resolvedProductId = product.id
+          }
+        }
+
+        const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1
+        const unitPrice = item.unitPrice !== undefined ? item.unitPrice : (item.totalPrice !== undefined ? item.totalPrice / quantity : 0)
+        const totalPrice = item.totalPrice !== undefined ? item.totalPrice : unitPrice * quantity
+
+        await prisma.saleItem.create({
+          data: {
+            saleId: result.id,
+            productId: itemProductId,
+            externalProductId: item.id ? String(item.id) : undefined,
+            name: String(item.name || 'Produto'),
+            sku: item.sku,
+            quantity,
+            unitPrice,
+            totalPrice
+          }
+        })
+      }
+    } catch (e) {
+      console.error('[upsertSale] Error upserting multi-items/order bumps:', e)
+    }
+  } else if (sale.productInfo?.name) {
     try {
       if (sale.productInfo.id) {
         const extProdId = String(sale.productInfo.id)

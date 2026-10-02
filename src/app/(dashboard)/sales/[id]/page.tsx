@@ -18,12 +18,13 @@ import {
   Share2,
   Trash2,
   AlertTriangle,
-  Pencil,
+  Package,
+  Zap,
+  ShoppingBag,
 } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { UtmTrackSymbol } from "@/components/brand/symbol";
 import { playNotificationSound, SoundType } from "@/lib/sound";
-import { EditSaleModal } from "@/components/sales/edit-sale-modal";
 
 export default function SaleDetailPage({
   params,
@@ -34,7 +35,6 @@ export default function SaleDetailPage({
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["sale-detail", id],
@@ -147,12 +147,6 @@ export default function SaleDetailPage({
         </Link>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setIsEditModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 dark:bg-blue-950/50 text-[#0066FF] dark:text-[#00D4FF] border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition"
-          >
-            <Pencil className="w-4 h-4" /> Editar Venda
-          </button>
-          <button
             onClick={() => playNotificationSound(getSoundForStatus(sale.status))}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-50 dark:bg-sky-950/50 text-[#0066FF] dark:text-[#00D4FF] border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition"
           >
@@ -212,6 +206,126 @@ export default function SaleDetailPage({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Order Items & Order Bumps Breakdown Card */}
+      <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+          <div className="flex items-center gap-2">
+            <ShoppingBag className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">
+              Itens do Pedido (Produto &amp; Order Bumps)
+            </h2>
+          </div>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40">
+            {sale.items && sale.items.length > 0 ? `${sale.items.length} ${sale.items.length === 1 ? 'item' : 'itens'}` : '1 item'}
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-500 uppercase font-bold text-[10px] tracking-wider border-b border-gray-100 dark:border-gray-800">
+              <tr>
+                <th className="py-2.5 px-3">Tipo</th>
+                <th className="py-2.5 px-3">Produto</th>
+                <th className="py-2.5 px-3 text-center">Qtd</th>
+                <th className="py-2.5 px-3 text-right">Valor Unitário</th>
+                <th className="py-2.5 px-3 text-right">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
+              {sale.items && sale.items.length > 0 ? (
+                sale.items.map((item: any, idx: number) => {
+                  const isBump = idx > 0;
+                  return (
+                    <tr
+                      key={item.id || idx}
+                      className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+                    >
+                      <td className="py-3 px-3">
+                        {isBump ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            <Zap className="w-3 h-3 text-amber-500 fill-amber-500" /> Order Bump
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            <Package className="w-3 h-3 text-blue-500" /> Principal
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 font-semibold text-gray-900 dark:text-white">
+                        <div className="flex flex-col">
+                          <span>{item.name || (isBump ? "Order Bump" : "Produto Principal")}</span>
+                          {item.sku && (
+                            <span className="text-[10px] text-gray-400 font-mono">SKU: {item.sku}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-center font-medium text-gray-600 dark:text-gray-400">
+                        {item.quantity || 1}x
+                      </td>
+                      <td className="py-3 px-3 text-right text-gray-600 dark:text-gray-400">
+                        {formatCurrency(item.unitPrice ?? item.totalPrice, sale.currency)}
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-gray-900 dark:text-white">
+                        {formatCurrency(item.totalPrice, sale.currency)}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td className="py-3 px-3">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                      <Package className="w-3 h-3 text-blue-500" /> Principal
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 font-semibold text-gray-900 dark:text-white">
+                    Produto Principal
+                  </td>
+                  <td className="py-3 px-3 text-center font-medium text-gray-600 dark:text-gray-400">
+                    1x
+                  </td>
+                  <td className="py-3 px-3 text-right text-gray-600 dark:text-gray-400">
+                    {formatCurrency(sale.grossAmount, sale.currency)}
+                  </td>
+                  <td className="py-3 px-3 text-right font-bold text-gray-900 dark:text-white">
+                    {formatCurrency(sale.grossAmount, sale.currency)}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Subtotal Summary for Order Bumps */}
+        {sale.items && sale.items.length > 1 && (
+          <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3 text-xs bg-slate-50 dark:bg-gray-800/40 p-3 rounded-xl">
+            <div className="flex items-center gap-4">
+              <div>
+                <span className="text-gray-500">Produto Principal:</span>{" "}
+                <strong className="text-gray-900 dark:text-white">
+                  {formatCurrency(sale.items[0]?.totalPrice ?? 0, sale.currency)}
+                </strong>
+              </div>
+              <div className="text-amber-600 dark:text-amber-400 font-semibold">
+                <span>⚡ Order Bumps ({sale.items.length - 1}):</span>{" "}
+                <strong>
+                  +{formatCurrency(
+                    sale.items.slice(1).reduce((acc: number, it: any) => acc + (it.totalPrice || 0), 0),
+                    sale.currency
+                  )}
+                </strong>
+              </div>
+            </div>
+            <div className="font-bold text-gray-900 dark:text-white text-sm">
+              <span>Total do Pedido: </span>
+              <span className="text-emerald-600 dark:text-emerald-400">
+                {formatCurrency(sale.grossAmount, sale.currency)}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Attribution & Meta Ads Card */}
@@ -351,18 +465,6 @@ export default function SaleDetailPage({
           </div>
         </div>
       )}
-
-      {/* Modal de Edição de Venda */}
-      <EditSaleModal
-        isOpen={isEditModalOpen}
-        sale={sale}
-        onClose={() => setIsEditModalOpen(false)}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ["sale-detail", id] });
-          queryClient.invalidateQueries({ queryKey: ["sales-list"] });
-          queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
-        }}
-      />
     </div>
   );
 }

@@ -84,6 +84,11 @@ export async function GET(req: Request) {
         take: limit,
         include: {
           attributionRecord: true,
+          items: {
+            include: {
+              product: true
+            }
+          }
         },
       }),
       prisma.sale.count({ where }),

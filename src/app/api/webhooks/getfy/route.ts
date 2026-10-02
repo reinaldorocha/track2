@@ -7,7 +7,8 @@ import {
   normalizeSalePaymentMethod, 
   normalizeSaleInstallments,
   normalizeSaleUtms, 
-  upsertSale 
+  upsertSale,
+  InternalSaleItem
 } from '@/lib/integrations/normalizer'
 import { createSaleNotification, SaleNotificationType } from '@/lib/notifications/service'
 import { authenticateWebhook } from '@/lib/integrations/webhook-auth'
@@ -149,6 +150,55 @@ export async function POST(req: Request) {
     const createdAt = order.created_at || envelopePayload.created_at || envelopePayload.createdAt || Date.now()
     const paidAt = envelopePayload.paidAt || (status === 'approved' ? (order.updated_at || new Date()) : undefined)
 
+    // Extração e normalização de Order Bumps enviados pelo Getfy
+    const rawBumps = (
+      envelopePayload.order_bumps ||
+      rawBody.order_bumps ||
+      order.order_bumps ||
+      order.orderItems ||
+      envelopePayload.order_items
+    ) as Array<Record<string, unknown>> | undefined
+
+    const validBumps: Array<{ id?: string; name: string; amount: number }> = []
+    if (Array.isArray(rawBumps)) {
+      for (const b of rawBumps) {
+        const bAmount = Number(b.amount ?? b.price ?? b.value ?? 0)
+        const bName = String(b.name || b.title || b.product_name || '').trim()
+        const bId = b.product_id ? String(b.product_id) : (b.id ? String(b.id) : undefined)
+        if (bName) {
+          validBumps.push({
+            id: bId,
+            name: bName,
+            amount: isNaN(bAmount) ? 0 : Math.max(0, bAmount)
+          })
+        }
+      }
+    }
+
+    const totalBumpsAmount = validBumps.reduce((acc, b) => acc + b.amount, 0)
+    const mainProductName = String(product.name || product.title || 'Produto Principal').trim()
+    const mainProductId = product.id ? String(product.id) : undefined
+    const mainProductPrice = Math.max(0, Math.round((grossPrice - totalBumpsAmount) * 100) / 100)
+
+    const saleItems: InternalSaleItem[] = [
+      {
+        id: mainProductId,
+        name: mainProductName,
+        quantity: 1,
+        unitPrice: mainProductPrice,
+        totalPrice: mainProductPrice,
+        isOrderBump: false
+      },
+      ...validBumps.map(b => ({
+        id: b.id,
+        name: b.name,
+        quantity: 1,
+        unitPrice: b.amount,
+        totalPrice: b.amount,
+        isOrderBump: true
+      }))
+    ]
+
     const sale = await upsertSale({
       workspaceId,
       platform: 'getfy',
@@ -174,10 +224,11 @@ export async function POST(req: Request) {
       orderedAt: new Date(createdAt as string | number),
       approvedAt: status === 'approved' ? (paidAt ? new Date(paidAt as string | number) : new Date()) : undefined,
       refundedAt: status === 'refunded' ? new Date() : undefined,
-      productInfo: (product.name || product.title) ? {
-        id: product.id ? String(product.id) : undefined,
-        name: String(product.name || product.title),
-      } : undefined
+      productInfo: {
+        id: mainProductId,
+        name: mainProductName,
+      },
+      items: saleItems
     })
 
     await prisma.webhookEvent.update({
@@ -193,6 +244,7 @@ export async function POST(req: Request) {
           paymentMethod,
           grossAmount: grossPrice,
           netAmount: sale.netAmount,
+          itemsCount: saleItems.length,
           capi: sale.capiResult
         })
       }
@@ -209,13 +261,16 @@ export async function POST(req: Request) {
     }
 
     if (notifType) {
+      const bumpSummary = validBumps.length > 0 
+        ? ` (+${validBumps.length} bump${validBumps.length > 1 ? 's' : ''})` 
+        : ''
       await createSaleNotification({
         workspaceId,
         type: notifType,
         amount: grossPrice,
         currency,
         platform: 'Getfy',
-        product: (product.name || product.title) ? String(product.name || product.title) : undefined,
+        product: `${mainProductName}${bumpSummary}`,
         saleId: sale.id,
         transactionId: orderId,
       }).catch(e => console.error('[Getfy Webhook] Notification dispatch error:', e))
