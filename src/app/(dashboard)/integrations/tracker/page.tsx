@@ -115,7 +115,7 @@ export default function TrackerPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Script unificado de rastreamento com integração automática ao Meta Pixel e CAPI</p>
         </div>
         <a
-          href="/integrations/utm"
+          href="/integrations?tab=UTMs"
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow flex items-center gap-1.5 self-start sm:self-auto"
         >
           Central de Rastreamento Completa →

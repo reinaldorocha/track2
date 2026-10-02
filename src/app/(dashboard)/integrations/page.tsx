@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plug,
@@ -33,10 +34,34 @@ import Link from "next/link";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { LiveLinkInspector } from "@/components/tracking/live-link-inspector";
 
-export default function IntegrationsHubPage() {
+const validTabs = ["ANÚNCIOS", "WEBHOOKS", "UTMs", "PIXEL", "TESTES", "INSPETOR"] as const;
+type TabType = typeof validTabs[number];
+
+function IntegrationsHubContent() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"ANÚNCIOS" | "WEBHOOKS" | "UTMs" | "PIXEL" | "TESTES" | "INSPETOR">("ANÚNCIOS");
+  const searchParams = useSearchParams();
+  const rawTab = (searchParams.get("tab") || "").toUpperCase();
+  const matchedTab = validTabs.find(t => t.toUpperCase() === rawTab);
+  const [activeTab, setActiveTab] = useState<TabType>(matchedTab || "ANÚNCIOS");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (rawTab) {
+      const match = validTabs.find(t => t.toUpperCase() === rawTab);
+      if (match && match !== activeTab) {
+        setActiveTab(match);
+      }
+    }
+  }, [rawTab]);
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tab);
+      window.history.replaceState(null, "", url.toString());
+    }
+  };
 
   // Estados dos Pixels
   const [isPixelModalOpen, setIsPixelModalOpen] = useState(false);
@@ -96,6 +121,28 @@ export default function IntegrationsHubPage() {
     queryFn: () => fetch("/api/integrations").then((r) => r.json()),
   });
 
+  const { data: utmLinksData, refetch: refetchUtmLinks } = useQuery<{ links: Array<{
+    id: string;
+    name?: string | null;
+    destinationUrl: string;
+    fullUrl: string;
+    utmSource?: string | null;
+    utmMedium?: string | null;
+    utmCampaign?: string | null;
+    utmContent?: string | null;
+    utmTerm?: string | null;
+    clicks: number;
+    createdAt: string;
+  }> }>({
+    queryKey: ["utm-links"],
+    queryFn: () => fetch("/api/utm/links").then((r) => r.json()),
+  });
+
+  const { data: diagData } = useQuery({
+    queryKey: ["tracking-diagnostics"],
+    queryFn: () => fetch("/api/tracking/diagnostics").then((r) => r.json()),
+  });
+
   const appUrl = typeof window !== "undefined" ? window.location.origin : "https://utm-track-navy.vercel.app";
 
   const integrationsList: Array<{
@@ -106,6 +153,9 @@ export default function IntegrationsHubPage() {
     webhookSecret: string;
     webhookUrl: string;
   }> = integrationsData?.integrations || [];
+
+  const utmLinks = utmLinksData?.links || [];
+  const currentWorkspaceId = diagData?.workspaceId || diagData?.workspace?.id || integrationsList[0]?.workspaceId || "";
 
   const getIntegrationByPlatform = (plat: string) =>
     integrationsList.find((i) => i.platform.toLowerCase() === plat.toLowerCase());
@@ -204,8 +254,9 @@ export default function IntegrationsHubPage() {
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
-  const handleGenerateUtm = () => {
+  const handleGenerateUtm = async () => {
     if (!utmDestination) return;
+    let finalUrl = "";
     try {
       const url = new URL(utmDestination.startsWith("http") ? utmDestination : `https://${utmDestination}`);
       if (utmSource) url.searchParams.set("utm_source", utmSource);
@@ -216,9 +267,41 @@ export default function IntegrationsHubPage() {
       // Meta Dynamic parameters
       url.searchParams.set("src", "{{site_source_name}}");
       url.searchParams.set("sck", "{{campaign.name}}");
-      setGeneratedUtmUrl(url.toString());
+      finalUrl = url.toString();
+      setGeneratedUtmUrl(finalUrl);
     } catch {
-      setGeneratedUtmUrl(`${utmDestination}?utm_source=${utmSource}&utm_medium=${utmMedium}&utm_campaign=${utmCampaign}&utm_content=${utmContent}&utm_term=${utmTerm}`);
+      finalUrl = `${utmDestination}?utm_source=${utmSource}&utm_medium=${utmMedium}&utm_campaign=${utmCampaign}&utm_content=${utmContent}&utm_term=${utmTerm}`;
+      setGeneratedUtmUrl(finalUrl);
+    }
+
+    try {
+      await fetch("/api/utm/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: utmDestination,
+          name: utmCampaign || "Link UTM",
+          utm_source: utmSource,
+          utm_medium: utmMedium,
+          utm_campaign: utmCampaign,
+          utm_content: utmContent,
+          utm_term: utmTerm,
+        }),
+      });
+      refetchUtmLinks();
+    } catch (e) {
+      console.error("Erro ao salvar link UTM:", e);
+    }
+  };
+
+  const handleDeleteUtmLink = async (id: string) => {
+    try {
+      const res = await fetch(`/api/utm/links?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        refetchUtmLinks();
+      }
+    } catch (e) {
+      console.error("Erro ao excluir link UTM:", e);
     }
   };
 
@@ -386,7 +469,7 @@ export default function IntegrationsHubPage() {
             return (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => handleTabChange(tab)}
                 className={`px-5 py-3 text-xs font-bold tracking-wider uppercase transition-all relative ${
                   isActive
                     ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
@@ -985,6 +1068,70 @@ export default function IntegrationsHubPage() {
             )}
           </div>
 
+          {/* Lista de Links Gerados e Salvos */}
+          <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-slate-200 dark:border-[#142C52] flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-sm text-slate-900 dark:text-white">Links Gerados & Salvos</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Histórico de URLs rastreadas criadas para este workspace</p>
+              </div>
+              <span className="text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-[#061224] px-2.5 py-1 rounded-full">
+                {utmLinks.length} {utmLinks.length === 1 ? 'link salvo' : 'links salvos'}
+              </span>
+            </div>
+            <div className="overflow-x-auto max-h-[360px]">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 dark:bg-[#061224] border-b border-slate-200 dark:border-[#142C52] text-slate-500 font-semibold">
+                  <tr>
+                    <th className="py-2.5 px-4">Campanha</th>
+                    <th className="py-2.5 px-4">URL Completa</th>
+                    <th className="py-2.5 px-4 text-center">Cliques</th>
+                    <th className="py-2.5 px-4 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-[#142C52]">
+                  {utmLinks.map((link) => (
+                    <tr key={link.id} className="hover:bg-slate-50/50 dark:hover:bg-[#0E2547]/50">
+                      <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
+                        {link.utmCampaign || link.name || "Geral"}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-[11px] text-slate-500 truncate max-w-sm" title={link.fullUrl}>
+                        {link.fullUrl}
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-slate-700 dark:text-slate-300">
+                        {link.clicks || 0}
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => copyToClipboard(link.fullUrl, link.id)}
+                            className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900 rounded font-bold hover:bg-blue-100 text-[11px]"
+                          >
+                            {copiedKey === link.id ? "Copiado!" : "Copiar"}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUtmLink(link.id)}
+                            className="p-1 text-rose-500 hover:text-rose-700"
+                            title="Excluir link"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {utmLinks.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-slate-400">
+                        Nenhum link gerado ainda. Preencha os campos acima para gerar e salvar.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {/* Seção Scripts (Tracker & Back Redirect) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-3">
@@ -997,13 +1144,23 @@ export default function IntegrationsHubPage() {
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Cole antes do fechamento da tag &lt;/body&gt; em todas as páginas do seu site ou funil.
               </p>
-              <pre className="p-3 bg-slate-950 text-slate-200 rounded-lg text-[11px] font-mono overflow-x-auto">
-                {`<script src="${appUrl}/tracker.js" data-api-url="${appUrl}" async></script>`}
+              <pre className="p-3 bg-slate-950 text-slate-200 rounded-lg text-[11px] font-mono overflow-x-auto whitespace-pre">
+{`<script 
+  src="${appUrl}/tracker.js" 
+  data-api-url="${appUrl}" 
+  data-workspace-id="${currentWorkspaceId || 'SEU_WORKSPACE_ID'}" 
+  async
+></script>`}
               </pre>
               <button
                 onClick={() =>
                   copyToClipboard(
-                    `<script src="${appUrl}/tracker.js" data-api-url="${appUrl}" async></script>`,
+`<script 
+  src="${appUrl}/tracker.js" 
+  data-api-url="${appUrl}" 
+  data-workspace-id="${currentWorkspaceId || 'SEU_WORKSPACE_ID'}" 
+  async
+></script>`,
                     "script_tracker"
                   )
                 }
@@ -1011,6 +1168,15 @@ export default function IntegrationsHubPage() {
               >
                 {copiedKey === "script_tracker" ? "Copiado!" : "Copiar Script de Tracking"}
               </button>
+
+              <div className="p-2.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/60 rounded-lg text-[11px] text-blue-900 dark:text-blue-300 space-y-1">
+                <p className="font-bold flex items-center gap-1">
+                  💡 Carregar Meta Pixel automaticamente:
+                </p>
+                <p className="text-[10px] text-blue-800 dark:text-blue-400">
+                  Para que o Tracker carregue o Pixel do Facebook sem precisar colar dois scripts na página, adicione o atributo <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1 py-0.5 rounded">data-pixel-id=&quot;SEU_PIXEL_ID&quot;</code> na tag script.
+                </p>
+              </div>
             </div>
 
             <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-3">
@@ -1491,5 +1657,13 @@ export default function IntegrationsHubPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function IntegrationsHubPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-500">Carregando integrações...</div>}>
+      <IntegrationsHubContent />
+    </Suspense>
   );
 }

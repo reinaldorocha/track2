@@ -84,13 +84,13 @@ export default function UTMPage() {
             onChange={(preset, from, to) => setPeriod({ preset, from, to, label: preset })}
           />
           <Link
-            href="/integrations/utm"
+            href="/integrations?tab=UTMs"
             className="flex items-center gap-1.5 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-slate-200 px-3.5 py-2 rounded-lg text-sm font-semibold border border-slate-200 dark:border-gray-700 transition-colors"
           >
             ⚙️ Configurar Rastreamento
           </Link>
           <Link
-            href="/integrations/utm"
+            href="/integrations?tab=UTMs"
             className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 shadow"
           >
             <Plus className="w-4 h-4" /> Criar Link UTM

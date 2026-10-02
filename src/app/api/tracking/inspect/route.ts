@@ -80,9 +80,9 @@ export async function POST(req: Request) {
     const hasWorkspaceId = html.includes(workspaceId)
     const hasDataApiUrl = /data-api-url/i.test(html)
 
-    // 2. Verificação do Meta Pixel
-    const hasMetaPixelFbq = /fbq\s*\(\s*['"]init['"]/i.test(html) || /connect\.facebook\.net\/.*\/fbevents\.js/i.test(html)
-    const pixelIdMatches = html.match(/fbq\s*\(\s*['"]init['"]\s*,\s*['"](\d+)['"]/i)
+    // 2. Verificação do Meta Pixel (nativo fbq ou via tracker.js data-pixel-id)
+    const hasMetaPixelFbq = /fbq\s*\(\s*['"]init['"]/i.test(html) || /connect\.facebook\.net\/.*\/fbevents\.js/i.test(html) || /data-pixel-id\s*=\s*['"]\d+['"]/i.test(html)
+    const pixelIdMatches = html.match(/fbq\s*\(\s*['"]init['"]\s*,\s*['"](\d+)['"]/i) || html.match(/data-pixel-id\s*=\s*['"](\d+)['"]/i)
     const detectedPixelId = pixelIdMatches ? pixelIdMatches[1] : null
 
     // 3. Verificação de Gateways de Checkout
@@ -201,7 +201,7 @@ export async function POST(req: Request) {
         name: 'Meta Pixel (Facebook)',
         status: 'warning',
         title: 'Meta Pixel não detectado no código-fonte',
-        details: 'Recomendamos manter o Pixel do Facebook ativo junto com o Tracker para máxima deduplicação CAPI.',
+        details: 'Recomendamos manter o Pixel do Facebook ativo (ou via atributo data-pixel-id no Tracker) para máxima deduplicação CAPI.',
       })
     }
 
