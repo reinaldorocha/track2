@@ -31,7 +31,7 @@ export function Header() {
     staleTime: 60000,
   })
 
-  const accumulatedRevenue = summaryData?.grossRevenue || 0
+  const accumulatedRevenue = summaryData?.allTimeGrossRevenue ?? summaryData?.grossRevenue ?? 0
   const targetGoal = 1000000 // Meta de R$ 1 Milhão
   const progressPercent = Math.min(Math.round((accumulatedRevenue / targetGoal) * 100 * 10) / 10, 100)
 

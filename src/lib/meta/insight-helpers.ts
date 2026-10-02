@@ -19,6 +19,9 @@ export function resolveRange(preset: string | null, timezone: string, fromValue:
     const lastPreviousMonth = shift(firstThisMonth, -1)
     return { from: `${lastPreviousMonth.slice(0, 7)}-01`, to: lastPreviousMonth }
   }
+  if (label.includes('todo') || label === 'all' || label === 'todas') {
+    return { from: '2020-01-01', to: today }
+  }
   return { from: chosenDay(fromValue, timezone, new Date(now.getTime() - 29 * 86400000)), to: chosenDay(toValue, timezone, now) }
 }
 

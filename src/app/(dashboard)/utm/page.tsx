@@ -23,19 +23,22 @@ type UtmRow = {
 
 export default function UTMPage() {
   const [period, setPeriod] = useState({
-    preset: "Últimos 30 dias",
-    ...getDateRange("last30days"),
+    preset: "Hoje",
+    ...getDateRange("today"),
   });
   const [sortField, setSortField] = useState<keyof UtmRow>("revenue");
   const [sortAsc, setSortAsc] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<UtmRow | null>(null);
 
   const { data, isLoading } = useQuery<{ campaigns: UtmRow[] }>({
-    queryKey: ["utm-campaigns", period.from.toISOString(), period.to.toISOString()],
+    queryKey: ["utm-campaigns", period.preset, period.from.toISOString(), period.to.toISOString()],
     queryFn: async () => {
-      const res = await fetch(
-        `/api/utm/campaigns?from=${period.from.toISOString()}&to=${period.to.toISOString()}`
-      );
+      const params = new URLSearchParams();
+      if (period.preset) params.append("preset", period.preset);
+      if (period.from) params.append("from", period.from.toISOString());
+      if (period.to) params.append("to", period.to.toISOString());
+
+      const res = await fetch(`/api/utm/campaigns?${params.toString()}`);
       if (!res.ok) throw new Error("Erro ao carregar");
       return res.json();
     },
@@ -63,6 +66,7 @@ export default function UTMPage() {
   const totalRevenue = campaigns.reduce((acc, c) => acc + c.revenue, 0);
   const totalSpend = campaigns.reduce((acc, c) => acc + c.spend, 0);
   const totalSales = campaigns.reduce((acc, c) => acc + c.sales, 0);
+  const totalApprovedSales = campaigns.reduce((acc, c) => acc + (c.approvedSales ?? c.sales), 0);
   const totalProfit = campaigns.reduce((acc, c) => acc + c.profit, 0);
 
   return (
@@ -99,19 +103,31 @@ export default function UTMPage() {
         <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Faturamento via UTM</p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{formatCurrency(totalRevenue)}</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {totalApprovedSales} {totalApprovedSales === 1 ? 'pedido confirmado' : 'pedidos confirmados'}
+          </p>
         </div>
         <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Investimento Atribuído</p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{formatCurrency(totalSpend)}</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Campanhas Meta Ads identificadas
+          </p>
         </div>
         <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Total de Pedidos</p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{totalSales}</p>
+          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium">
+            {totalApprovedSales} confirmados{totalSales > totalApprovedSales ? ` (${totalSales - totalApprovedSales} pend./canc.)` : ''}
+          </p>
         </div>
         <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">Lucro Líquido</p>
           <p className={`text-2xl font-bold mt-1 ${totalProfit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
             {formatCurrency(totalProfit)}
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Após taxas e anúncios
           </p>
         </div>
       </div>
@@ -187,7 +203,14 @@ export default function UTMPage() {
                       {row.campaign}
                     </td>
                     <td className="py-3 px-3 text-right text-gray-600 dark:text-gray-400 font-mono text-xs">{row.sessions}</td>
-                    <td className="py-3 px-3 text-right font-medium text-gray-900 dark:text-white">{row.sales}</td>
+                    <td className="py-3 px-3 text-right font-medium text-gray-900 dark:text-white">
+                      <span>{row.approvedSales}</span>
+                      {row.sales > row.approvedSales && (
+                        <span className="text-[10px] text-gray-400 block font-normal">
+                          de {row.sales} total
+                        </span>
+                      )}
+                    </td>
                     <td className="py-3 px-3 text-right text-gray-600 dark:text-gray-400">{formatCurrency(row.spend)}</td>
                     <td className="py-3 px-3 text-right text-gray-600 dark:text-gray-400">{formatMetric(row.cpa, "currency")}</td>
                     <td className="py-3 px-3 text-right font-semibold text-gray-900 dark:text-white">{formatCurrency(row.revenue)}</td>

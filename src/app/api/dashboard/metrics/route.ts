@@ -257,9 +257,28 @@ export async function GET(req: Request) {
     const ctr = calcCTR(clicks, impressions)
     const cpm = calcCPM(adSpend, impressions)
     const cpi = calcCPI(adSpend, effectiveICs || approvedSales)
+    const allTimeAgg = await prisma.sale.aggregate({
+      where: {
+        workspaceId,
+        status: { in: ['approved', 'paid', 'aprovado', 'pago', 'completed'] }
+      },
+      _sum: {
+        grossAmount: true,
+        netAmount: true,
+      },
+      _count: {
+        id: true,
+      }
+    })
+    const allTimeGrossRevenue = allTimeAgg._sum?.grossAmount || 0
+    const allTimeApprovedSales = allTimeAgg._count?.id || 0
 
     return NextResponse.json({
-      // Financeiro
+      // Acumulado Histórico Geral (Metas & Troféu)
+      allTimeGrossRevenue,
+      allTimeApprovedSales,
+
+      // Financeiro do Período
       grossRevenue,
       netRevenue,
       adSpend,
