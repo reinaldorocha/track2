@@ -41,6 +41,20 @@ if ! grep -Eq '^DATABASE_URL="?postgres(ql)?://' .env.production; then
     exit 1
 fi
 
+# Garantir que CRON_SECRET está configurado no .env.production para o container de cron
+if ! grep -q "^CRON_SECRET=" .env.production; then
+    echo -e "${YELLOW}>> Gerando CRON_SECRET para o agendador automático da Meta Ads...${NC}"
+    if command -v openssl &> /dev/null; then
+        NEW_CRON_SECRET=$(openssl rand -hex 32)
+    else
+        NEW_CRON_SECRET=$(cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 64 | head -n 1)
+    fi
+    echo "" >> .env.production
+    echo "# Segredo do Agendador Automático de Sincronização (Meta Ads 15m)" >> .env.production
+    echo "CRON_SECRET=\"${NEW_CRON_SECRET}\"" >> .env.production
+    echo -e "${GREEN}[OK] CRON_SECRET adicionado ao .env.production com sucesso.${NC}"
+fi
+
 # 3. Baixar atualizações do repositório Git
 echo -e "${YELLOW}>> 1. Baixando novidades do repositório Git...${NC}"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")

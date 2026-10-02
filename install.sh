@@ -139,21 +139,27 @@ echo -e "\n${YELLOW}>> 4. Gerando chaves criptográficas de segurança e configu
 if command -v openssl &> /dev/null; then
     GEN_NEXTAUTH_SECRET=$(openssl rand -base64 32)
     GEN_ENCRYPTION_KEY=$(openssl rand -hex 32)
+    GEN_CRON_SECRET=$(openssl rand -hex 32)
 else
     GEN_NEXTAUTH_SECRET=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 44 | head -n 1)
     GEN_ENCRYPTION_KEY=$(cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 64 | head -n 1)
+    GEN_CRON_SECRET=$(cat /dev/urandom | tr -dc 'a-f0-9' | fold -w 64 | head -n 1)
 fi
 
 # Se já houver chaves anteriores, preservá-las para não invalidar sessões
 if [ -f ".env.production" ]; then
     OLD_NEXTAUTH_SECRET=$(grep -E '^NEXTAUTH_SECRET=' .env.production | cut -d '=' -f2 | tr -d '"' | tr -d "'")
     OLD_ENCRYPTION_KEY=$(grep -E '^ENCRYPTION_KEY=' .env.production | cut -d '=' -f2 | tr -d '"' | tr -d "'")
+    OLD_CRON_SECRET=$(grep -E '^CRON_SECRET=' .env.production | cut -d '=' -f2 | tr -d '"' | tr -d "'")
     
     if [ -n "$OLD_NEXTAUTH_SECRET" ]; then
         GEN_NEXTAUTH_SECRET="$OLD_NEXTAUTH_SECRET"
     fi
     if [ -n "$OLD_ENCRYPTION_KEY" ]; then
         GEN_ENCRYPTION_KEY="$OLD_ENCRYPTION_KEY"
+    fi
+    if [ -n "$OLD_CRON_SECRET" ]; then
+        GEN_CRON_SECRET="$OLD_CRON_SECRET"
     fi
 fi
 
@@ -175,6 +181,9 @@ AUTH_TRUST_HOST=true
 
 # Chave Mestre de Criptografia AES-256-GCM (Tokens Meta e Webhooks)
 ENCRYPTION_KEY="${GEN_ENCRYPTION_KEY}"
+
+# Segredo do Agendador Automático de Sincronização (Meta Ads 15m)
+CRON_SECRET="${GEN_CRON_SECRET}"
 
 # Conexão PostgreSQL (Rede Interna Docker: ${PG_NETWORK})
 DATABASE_URL="${DATABASE_URL}"
