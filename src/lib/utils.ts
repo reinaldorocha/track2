@@ -22,6 +22,32 @@ export function getDateRange(preset: string): DateRange {
   const now = new Date();
   const normalized = (preset || "").trim().toLowerCase();
 
+  // 0. Personalizado / Custom
+  if (normalized.startsWith("personalizado") || normalized.startsWith("custom")) {
+    const isoMatches = normalized.match(/\d{4}-\d{2}-\d{2}/g);
+    if (isoMatches && isoMatches.length >= 2) {
+      const d1 = new Date(isoMatches[0] + "T00:00:00");
+      const d2 = new Date(isoMatches[1] + "T23:59:59.999");
+      if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+        return { from: d1 <= d2 ? d1 : d2, to: d1 <= d2 ? d2 : d1, label: preset };
+      }
+    }
+    const brMatches = normalized.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/g);
+    if (brMatches && brMatches.length >= 2) {
+      const parseBr = (s: string) => {
+        const m = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+        return m ? new Date(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}T00:00:00`) : null;
+      };
+      const d1 = parseBr(brMatches[0]);
+      const d2 = parseBr(brMatches[1]);
+      if (d1 && d2 && !isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+        d2.setHours(23, 59, 59, 999);
+        return { from: d1 <= d2 ? d1 : d2, to: d1 <= d2 ? d2 : d1, label: preset };
+      }
+    }
+    return { from: startOfDay(now), to: endOfDay(now), label: preset || "Personalizado" };
+  }
+
   // 1. Hoje
   if (normalized === "hoje" || normalized === "today") {
     return { from: startOfDay(now), to: endOfDay(now), label: "Hoje" };
@@ -34,27 +60,27 @@ export function getDateRange(preset: string): DateRange {
   }
 
   // 3. Últimos 7 dias
-  if (normalized.includes("7") || normalized === "last7days") {
+  if (normalized === "últimos 7 dias" || normalized === "ultimos 7 dias" || normalized === "last 7 days" || normalized === "last7days" || normalized === "7d" || normalized === "7 dias") {
     return { from: startOfDay(subDays(now, 6)), to: endOfDay(now), label: "Últimos 7 dias" };
   }
 
   // 4. Últimos 15 dias
-  if (normalized.includes("15") || normalized === "last15days") {
+  if (normalized === "últimos 15 dias" || normalized === "ultimos 15 dias" || normalized === "last 15 days" || normalized === "last15days" || normalized === "15d" || normalized === "15 dias") {
     return { from: startOfDay(subDays(now, 14)), to: endOfDay(now), label: "Últimos 15 dias" };
   }
 
   // 5. Últimos 30 dias
-  if (normalized.includes("30") || normalized === "last30days") {
+  if (normalized === "últimos 30 dias" || normalized === "ultimos 30 dias" || normalized === "last 30 days" || normalized === "last30days" || normalized === "30d" || normalized === "30 dias") {
     return { from: startOfDay(subDays(now, 29)), to: endOfDay(now), label: "Últimos 30 dias" };
   }
 
   // 6. Últimos 60 dias
-  if (normalized.includes("60") || normalized === "last60days") {
+  if (normalized === "últimos 60 dias" || normalized === "ultimos 60 dias" || normalized === "last 60 days" || normalized === "last60days" || normalized === "60d" || normalized === "60 dias") {
     return { from: startOfDay(subDays(now, 59)), to: endOfDay(now), label: "Últimos 60 dias" };
   }
 
   // 7. Últimos 90 dias
-  if (normalized.includes("90") || normalized === "last90days") {
+  if (normalized === "últimos 90 dias" || normalized === "ultimos 90 dias" || normalized === "last 90 days" || normalized === "last90days" || normalized === "90d" || normalized === "90 dias") {
     return { from: startOfDay(subDays(now, 89)), to: endOfDay(now), label: "Últimos 90 dias" };
   }
 
