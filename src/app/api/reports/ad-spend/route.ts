@@ -126,9 +126,38 @@ export async function GET(req: Request) {
     const salesGross = Math.round(approvedSales.reduce((acc, s) => acc + (s.grossAmount || 0), 0) * 100) / 100
     const salesNet = Math.round(approvedSales.reduce((acc, s) => acc + (s.netAmount || s.grossAmount || 0), 0) * 100) / 100
 
+    // 3. Consultar regras de impostos ativas do workspace
+    const taxes = await prisma.tax.findMany({
+      where: { workspaceId: workspace.id, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const metaAdsTaxes = taxes.filter((t) => {
+      const tp = (t.type || '').toLowerCase().trim()
+      const nm = (t.name || '').toLowerCase().trim()
+      return tp === 'meta_ads' || nm.includes('meta') || nm.includes('iof') || nm.includes('anúncio') || nm.includes('anuncio') || nm.includes('trafego')
+    })
+
+    const salesTaxes = taxes.filter((t) => {
+      const tp = (t.type || '').toLowerCase().trim()
+      const nm = (t.name || '').toLowerCase().trim()
+      const isMeta = tp === 'meta_ads' || nm.includes('meta') || nm.includes('iof') || nm.includes('anúncio') || nm.includes('anuncio') || nm.includes('trafego')
+      return !isMeta
+    })
+
+    const metaAdsTaxRate = Math.round(metaAdsTaxes.reduce((sum, t) => sum + (t.percentage || 0), 0) * 100) / 100
+    const metaAdsTaxAmount = Math.round((adSpend * (metaAdsTaxRate / 100)) * 100) / 100
+    const totalAdCostWithTaxes = Math.round((adSpend + metaAdsTaxAmount) * 100) / 100
+
+    const salesTaxRate = Math.round(salesTaxes.reduce((sum, t) => sum + (t.percentage || 0), 0) * 100) / 100
+    const salesTaxAmount = Math.round((salesGross * (salesTaxRate / 100)) * 100) / 100
+    const totalTaxes = Math.round((metaAdsTaxAmount + salesTaxAmount) * 100) / 100
+
     const roas = adSpend > 0 ? Math.round((salesGross / adSpend) * 100) / 100 : 0
+    const realRoas = totalAdCostWithTaxes > 0 ? Math.round((salesGross / totalAdCostWithTaxes) * 100) / 100 : 0
     const cpa = salesCount > 0 && adSpend > 0 ? Math.round((adSpend / salesCount) * 100) / 100 : 0
     const realProfit = Math.round((salesNet - adSpend) * 100) / 100
+    const realProfitAfterTaxes = Math.round((salesNet - totalAdCostWithTaxes - salesTaxAmount) * 100) / 100
 
     return NextResponse.json({
       success: true,
@@ -155,6 +184,24 @@ export async function GET(req: Request) {
       cpm,
       cpm_formatted: formatBRL(cpm),
       meta_purchases: metaPurchases,
+      // Detalhamento de Impostos (IOF/Anúncios e Vendas)
+      taxes: {
+        ad_spend_tax_rate: metaAdsTaxRate,
+        ad_spend_tax: metaAdsTaxAmount,
+        ad_spend_tax_formatted: formatBRL(metaAdsTaxAmount),
+        ad_spend_with_tax: totalAdCostWithTaxes,
+        ad_spend_with_tax_formatted: formatBRL(totalAdCostWithTaxes),
+        sales_tax_rate: salesTaxRate,
+        sales_tax: salesTaxAmount,
+        sales_tax_formatted: formatBRL(salesTaxAmount),
+        total_taxes: totalTaxes,
+        total_taxes_formatted: formatBRL(totalTaxes),
+        rules: taxes.map((t) => ({
+          name: t.name,
+          type: t.type,
+          percentage: t.percentage,
+        })),
+      },
       // Vendas & ROAS apurados no utm-track
       utm_sales: {
         orders_count: salesCount,
@@ -163,10 +210,13 @@ export async function GET(req: Request) {
         net_revenue: salesNet,
         net_revenue_formatted: formatBRL(salesNet),
         roas,
+        real_roas: realRoas,
         cpa,
         cpa_formatted: formatBRL(cpa),
         real_profit: realProfit,
         real_profit_formatted: formatBRL(realProfit),
+        real_profit_after_taxes: realProfitAfterTaxes,
+        real_profit_after_taxes_formatted: formatBRL(realProfitAfterTaxes),
       },
     })
   } catch (error) {
