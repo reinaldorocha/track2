@@ -4,25 +4,122 @@ export const day = (instant: Date, timezone: string) => new Intl.DateTimeFormat(
 export const chosenDay = (value: string | null, timezone: string, fallback: Date) => value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : day(value && !Number.isNaN(Date.parse(value)) ? new Date(value) : fallback, timezone)
 export const nextDay = (value: string) => new Date(Date.parse(value + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10)
 
+export function extractDateStr(value: string | null | undefined, timezone: string): string | null {
+  if (!value) return null
+  const str = String(value).trim()
+  if (!str) return null
+
+  // 1. Direct YYYY-MM-DD or starting with YYYY-MM-DD (ex: "2026-09-30", "2026-09-30T00:00:00.000Z")
+  const isoDateMatch = str.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (isoDateMatch) {
+    if (str.includes('T') && !Number.isNaN(Date.parse(str))) {
+      // Se for exatamente meia-noite UTC (ex: 2026-09-30T00:00:00), foi serializado com foco no dia do calendário
+      if (str.includes('T00:00:00')) {
+        return isoDateMatch[1]
+      }
+      return day(new Date(str), timezone)
+    }
+    return isoDateMatch[1]
+  }
+
+  // 2. Brazilian format: DD/MM/YYYY or DD-MM-YYYY (ex: "30/09/2026" or "30-09-2026")
+  const brMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/)
+  if (brMatch) {
+    const [, d, m, y] = brMatch
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
+
+  // 3. Any other parseable date
+  const parsed = Date.parse(str)
+  if (!Number.isNaN(parsed)) {
+    return day(new Date(parsed), timezone)
+  }
+
+  return null
+}
+
 export function resolveRange(preset: string | null, timezone: string, fromValue: string | null, toValue: string | null, now = new Date()): { from: string; to: string } {
-  const label = (preset || '').toLowerCase()
+  const label = (preset || '').toLowerCase().trim()
   const today = day(now, timezone)
   const shift = (value: string, days: number) => new Date(Date.parse(value + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10)
+
+  // 1. PRIORIDADE MÁXIMA: Período Personalizado / Customizado
+  // Se preset começar com "personalizado" ou "custom", ou se fromValue/toValue forem fornecidos explicitamente
+  const isCustomPreset = label.startsWith('personalizado') || label.startsWith('custom') || label === 'custom_range'
+  
+  if (isCustomPreset || (!preset && (fromValue || toValue))) {
+    let from = extractDateStr(fromValue, timezone)
+    let to = extractDateStr(toValue, timezone)
+
+    // Se não veio em fromValue/toValue, tenta extrair da própria string do preset (ex: "Personalizado: 2026-09-30 - 2026-09-30" ou "Personalizado: 30/09/2026 a 30/09/2026")
+    if (!from || !to) {
+      const isoMatches = label.match(/\d{4}-\d{2}-\d{2}/g)
+      if (isoMatches && isoMatches.length >= 2) {
+        from = from || isoMatches[0]
+        to = to || isoMatches[1]
+      } else if (isoMatches && isoMatches.length === 1) {
+        from = from || isoMatches[0]
+        to = to || isoMatches[0]
+      } else {
+        const brMatches = label.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/g)
+        if (brMatches && brMatches.length >= 2) {
+          from = from || extractDateStr(brMatches[0], timezone)
+          to = to || extractDateStr(brMatches[1], timezone)
+        } else if (brMatches && brMatches.length === 1) {
+          from = from || extractDateStr(brMatches[0], timezone)
+          to = to || extractDateStr(brMatches[0], timezone)
+        }
+      }
+    }
+
+    if (from && to) {
+      if (from > to) {
+        const temp = from
+        from = to
+        to = temp
+      }
+      return { from, to }
+    }
+    if (from && !to) return { from, to: from }
+    if (!from && to) return { from: to, to }
+  }
+
+  // 2. Presets fixos
   if (label === 'hoje' || label === 'today') return { from: today, to: today }
   if (label === 'ontem' || label === 'yesterday') return { from: shift(today, -1), to: shift(today, -1) }
-  for (const count of [7, 15, 30, 60, 90]) {
-    if (label.includes(String(count)) || label === `last${count}days`) return { from: shift(today, 1 - count), to: today }
+
+  // Presets relativos de contagem de dias: SOMENTE palavras-chave específicas (NUNCA substring de número isolado)
+  const daysPresets: Array<{ days: number; patterns: string[] }> = [
+    { days: 7, patterns: ['últimos 7 dias', 'ultimos 7 dias', 'last 7 days', 'last7days', '7d', '7 dias'] },
+    { days: 15, patterns: ['últimos 15 dias', 'ultimos 15 dias', 'last 15 days', 'last15days', '15d', '15 dias'] },
+    { days: 30, patterns: ['últimos 30 dias', 'ultimos 30 dias', 'last 30 days', 'last30days', '30d', '30 dias'] },
+    { days: 60, patterns: ['últimos 60 dias', 'ultimos 60 dias', 'last 60 days', 'last60days', '60d', '60 dias'] },
+    { days: 90, patterns: ['últimos 90 dias', 'ultimos 90 dias', 'last 90 days', 'last90days', '90d', '90 dias'] },
+  ]
+
+  for (const p of daysPresets) {
+    if (p.patterns.some(pattern => label === pattern || label.startsWith(pattern) || label.endsWith(pattern))) {
+      return { from: shift(today, 1 - p.days), to: today }
+    }
   }
-  if (label.includes('este m') || label === 'thismonth') return { from: `${today.slice(0, 7)}-01`, to: today }
-  if (label.includes('anterior') || label === 'lastmonth') {
+
+  if (label.includes('este m') || label === 'thismonth' || label === 'this_month') {
+    return { from: `${today.slice(0, 7)}-01`, to: today }
+  }
+
+  if (label.includes('anterior') || label === 'lastmonth' || label === 'last_month') {
     const firstThisMonth = `${today.slice(0, 7)}-01`
     const lastPreviousMonth = shift(firstThisMonth, -1)
     return { from: `${lastPreviousMonth.slice(0, 7)}-01`, to: lastPreviousMonth }
   }
+
   if (label.includes('todo') || label === 'all' || label === 'todas') {
     return { from: '2020-01-01', to: today }
   }
-  return { from: chosenDay(fromValue, timezone, new Date(now.getTime() - 29 * 86400000)), to: chosenDay(toValue, timezone, now) }
+
+  const fallbackFrom = extractDateStr(fromValue, timezone) || shift(today, -29)
+  const fallbackTo = extractDateStr(toValue, timezone) || today
+  return { from: fallbackFrom, to: fallbackTo }
 }
 
 export function midnight(value: string, timezone: string): Date {

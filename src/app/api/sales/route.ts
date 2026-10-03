@@ -42,14 +42,18 @@ export async function GET(req: Request) {
       where.platform = platform.toLowerCase()
     }
 
+    const andClauses: any[] = []
+
     if (search) {
-      where.OR = [
-        { externalId: { contains: search } },
-        { externalRef: { contains: search } },
-        { customerEmail: { contains: search } },
-        { utmCampaign: { contains: search } },
-        { utmSource: { contains: search } },
-      ]
+      andClauses.push({
+        OR: [
+          { externalId: { contains: search } },
+          { externalRef: { contains: search } },
+          { customerEmail: { contains: search } },
+          { utmCampaign: { contains: search } },
+          { utmSource: { contains: search } },
+        ]
+      })
     }
 
     const statsWhere: any = { workspaceId }
@@ -66,14 +70,20 @@ export async function GET(req: Request) {
       const tz = workspace?.timezone || 'America/Sao_Paulo'
       const interval = resolveAnalyticsInterval(preset || null, tz, from, to)
 
-      where.orderedAt = {
-        gte: interval.saleFrom,
-        lt: interval.saleTo
+      const dateClause = {
+        OR: [
+          { approvedAt: { gte: interval.saleFrom, lt: interval.saleTo } },
+          { approvedAt: null, orderedAt: { gte: interval.saleFrom, lt: interval.saleTo } },
+          { orderedAt: { gte: interval.saleFrom, lt: interval.saleTo } }
+        ]
       }
-      statsWhere.orderedAt = {
-        gte: interval.saleFrom,
-        lt: interval.saleTo
-      }
+
+      andClauses.push(dateClause)
+      statsWhere.OR = dateClause.OR
+    }
+
+    if (andClauses.length > 0) {
+      where.AND = andClauses
     }
 
     const [sales, totalCount, allStatusSales] = await Promise.all([
