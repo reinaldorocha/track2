@@ -61,8 +61,12 @@ export class MetaApiClient {
       if (axios.isAxiosError(err)) {
         const errorData = err.response?.data?.error
         if (errorData) {
+          const detail = errorData.error_user_msg || errorData.error_user_title || errorData.error_data
+          const msg = detail && detail !== errorData.message
+            ? `${errorData.message} (${typeof detail === 'string' ? detail : JSON.stringify(detail)})`
+            : errorData.message || 'Erro na Meta Graph API'
           throw new MetaApiError(
-            errorData.message || 'Erro na Meta Graph API',
+            msg,
             errorData.code,
             errorData.error_subcode
           )
@@ -172,8 +176,12 @@ export class MetaApiClient {
       if (axios.isAxiosError(err)) {
         const errorData = err.response?.data?.error
         if (errorData) {
+          const detail = errorData.error_user_msg || errorData.error_user_title || errorData.error_data
+          const msg = detail && detail !== errorData.message
+            ? `${errorData.message} (${typeof detail === 'string' ? detail : JSON.stringify(detail)})`
+            : errorData.message || 'Erro na Meta Graph API'
           throw new MetaApiError(
-            errorData.message || 'Erro na Meta Graph API',
+            msg,
             errorData.code,
             errorData.error_subcode
           )
