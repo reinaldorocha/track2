@@ -50,7 +50,7 @@ export class MetaApiError extends Error {
 export class MetaApiClient {
   constructor(private accessToken: string) {}
   
-  private async get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+  async get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
     try {
       const response = await axios.get(`${BASE}${path}`, {
         params: { ...params, access_token: this.accessToken },
@@ -161,11 +161,11 @@ export class MetaApiClient {
     return this.getAll<MetaInsight>(`/${accountId}/insights`, params)
   }
 
-  async post<T>(path: string, data: Record<string, unknown> = {}, params: Record<string, string> = {}): Promise<T> {
+  async post<T>(path: string, data: Record<string, unknown> = {}, params: Record<string, string> = {}, timeoutMs = 25000): Promise<T> {
     try {
       const response = await axios.post(`${BASE}${path}`, data, {
         params: { ...params, access_token: this.accessToken },
-        timeout: 20000,
+        timeout: timeoutMs,
       })
       return response.data
     } catch (err: unknown) {
@@ -215,11 +215,33 @@ export class MetaApiClient {
     const id = campaignId.replace(/^act_/, '')
     const deepCopy = options.deepCopy !== false
     const statusOption = options.status || 'PAUSED'
-    return this.post<{ id?: string; copied_parent_id?: string; success?: boolean }>(`/${id}/copies`, {
-      deep_copy: deepCopy,
-      status_option: statusOption,
-      ...(options.suffix ? { rename_options: { suffix: options.suffix } } : {}),
-    })
+    const suffix = options.suffix || ' - Cópia'
+    try {
+      return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+        `/${id}/copies`,
+        {
+          deep_copy: deepCopy,
+          status_option: statusOption,
+          rename_suffix: suffix,
+          rename_options: { rename_strategy: 'DEEP_RENAME' },
+        },
+        {},
+        45000
+      )
+    } catch (err: unknown) {
+      if (err instanceof MetaApiError && (err.code === 100 || /rename|param/i.test(err.message))) {
+        return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+          `/${id}/copies`,
+          {
+            deep_copy: deepCopy,
+            status_option: statusOption,
+          },
+          {},
+          45000
+        )
+      }
+      throw err
+    }
   }
 
   async duplicateAdSet(
@@ -229,11 +251,33 @@ export class MetaApiClient {
     const id = adSetId.replace(/^act_/, '')
     const deepCopy = options.deepCopy !== false
     const statusOption = options.status || 'PAUSED'
-    return this.post<{ id?: string; copied_parent_id?: string; success?: boolean }>(`/${id}/copies`, {
-      deep_copy: deepCopy,
-      status_option: statusOption,
-      ...(options.suffix ? { rename_options: { suffix: options.suffix } } : {}),
-    })
+    const suffix = options.suffix || ' - Cópia'
+    try {
+      return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+        `/${id}/copies`,
+        {
+          deep_copy: deepCopy,
+          status_option: statusOption,
+          rename_suffix: suffix,
+          rename_options: { rename_strategy: 'DEEP_RENAME' },
+        },
+        {},
+        45000
+      )
+    } catch (err: unknown) {
+      if (err instanceof MetaApiError && (err.code === 100 || /rename|param/i.test(err.message))) {
+        return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+          `/${id}/copies`,
+          {
+            deep_copy: deepCopy,
+            status_option: statusOption,
+          },
+          {},
+          45000
+        )
+      }
+      throw err
+    }
   }
 
   async duplicateAd(
@@ -242,10 +286,31 @@ export class MetaApiClient {
   ) {
     const id = adId.replace(/^act_/, '')
     const statusOption = options.status || 'PAUSED'
-    return this.post<{ id?: string; copied_parent_id?: string; success?: boolean }>(`/${id}/copies`, {
-      status_option: statusOption,
-      ...(options.suffix ? { rename_options: { suffix: options.suffix } } : {}),
-    })
+    const suffix = options.suffix || ' - Cópia'
+    try {
+      return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+        `/${id}/copies`,
+        {
+          status_option: statusOption,
+          rename_suffix: suffix,
+          rename_options: { rename_strategy: 'ONLY_TOP_LEVEL_RENAME' },
+        },
+        {},
+        45000
+      )
+    } catch (err: unknown) {
+      if (err instanceof MetaApiError && (err.code === 100 || /rename|param/i.test(err.message))) {
+        return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+          `/${id}/copies`,
+          {
+            status_option: statusOption,
+          },
+          {},
+          45000
+        )
+      }
+      throw err
+    }
   }
 }
 

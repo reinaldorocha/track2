@@ -52,4 +52,27 @@ describe('Meta Ads Management — Edição e Duplicação (Estilo UTMFY)', () =>
     assert.equal(updates.length, 3)
     assert.ok(updates.every(u => u.status === 'PAUSED'))
   })
+
+  // 5. Extração de ID de cópia em múltiplos formatos da Meta Graph API
+  it('5. Extrai copiedId com sucesso de diferentes formatos retornados pela Meta (id, copied_id, copied_parent_id, arrays)', () => {
+    const extractCopiedId = (result: Record<string, unknown>) => {
+      return (
+        result.id ||
+        result.copied_id ||
+        result.copied_parent_id ||
+        (Array.isArray(result.campaigns) ? (result.campaigns as Array<{ id: string }>)[0]?.id : undefined) ||
+        (Array.isArray(result.adsets) ? (result.adsets as Array<{ id: string }>)[0]?.id : undefined) ||
+        (Array.isArray(result.ads) ? (result.ads as Array<{ id: string }>)[0]?.id : undefined)
+      ) as string | undefined
+    }
+
+    assert.equal(extractCopiedId({ id: '120211111' }), '120211111')
+    assert.equal(extractCopiedId({ copied_id: '120222222' }), '120222222')
+    assert.equal(extractCopiedId({ copied_parent_id: '120233333' }), '120233333')
+    assert.equal(extractCopiedId({ campaigns: [{ id: '120244444' }] }), '120244444')
+    assert.equal(extractCopiedId({ adsets: [{ id: '120255555' }] }), '120255555')
+    assert.equal(extractCopiedId({ ads: [{ id: '120266666' }] }), '120266666')
+    assert.equal(extractCopiedId({}), undefined)
+  })
 })
+
