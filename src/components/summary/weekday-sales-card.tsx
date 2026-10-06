@@ -48,7 +48,7 @@ export function WeekdaySalesCard({ data = [], loading = false }: WeekdaySalesCar
   }, [orderedData, totalGross])
 
   return (
-    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3.5">
+    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-3.5 sm:p-5 shadow-sm space-y-3 sm:space-y-3.5">
       {/* Cabeçalho Compacto */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -56,7 +56,7 @@ export function WeekdaySalesCard({ data = [], loading = false }: WeekdaySalesCar
             <CalendarDays className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                 Vendas por Dia da Semana
               </h3>
@@ -65,7 +65,7 @@ export function WeekdaySalesCard({ data = [], loading = false }: WeekdaySalesCar
               </span>
               {bestRevenueDay && bestRevenueDay.grossRevenue > 0 && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300">
-                  <Trophy className="w-3 h-3 text-amber-500" />
+                  <Trophy className="w-3 h-3 text-amber-500 shrink-0" />
                   Melhor: <strong className="font-bold">{bestRevenueDay.name}</strong> ({formatCurrency(bestRevenueDay.grossRevenue)})
                 </span>
               )}
@@ -80,7 +80,7 @@ export function WeekdaySalesCard({ data = [], loading = false }: WeekdaySalesCar
         <div className="flex items-center bg-slate-100 dark:bg-[#061224] p-1 rounded-lg border border-slate-200 dark:border-[#142C52] text-xs self-start sm:self-auto">
           <button
             onClick={() => setViewMode('chart')}
-            className={`px-3 py-1 rounded-md font-medium transition-all flex items-center gap-1.5 ${
+            className={`px-2.5 sm:px-3 py-1 rounded-md font-medium transition-all flex items-center gap-1.5 ${
               viewMode === 'chart'
                 ? 'bg-white dark:bg-[#0E2547] text-indigo-600 dark:text-indigo-300 font-bold shadow-sm'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
@@ -92,7 +92,7 @@ export function WeekdaySalesCard({ data = [], loading = false }: WeekdaySalesCar
           </button>
           <button
             onClick={() => setViewMode('table')}
-            className={`px-3 py-1 rounded-md font-medium transition-all flex items-center gap-1.5 ${
+            className={`px-2.5 sm:px-3 py-1 rounded-md font-medium transition-all flex items-center gap-1.5 ${
               viewMode === 'table'
                 ? 'bg-white dark:bg-[#0E2547] text-indigo-600 dark:text-indigo-300 font-bold shadow-sm'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
@@ -121,7 +121,7 @@ export function WeekdaySalesCard({ data = [], loading = false }: WeekdaySalesCar
         </div>
       ) : viewMode === 'chart' ? (
         /* 1. VISÃO DE BARRAS ESBELTAS E COMPACTAS */
-        <div className="bg-slate-50/70 dark:bg-[#061224]/70 border border-slate-200/80 dark:border-[#142C52] rounded-xl p-3 sm:p-4">
+        <div className="bg-slate-50/70 dark:bg-[#061224]/70 border border-slate-200/80 dark:border-[#142C52] rounded-xl p-2.5 sm:p-4">
           <div className="grid grid-cols-7 gap-1 sm:gap-3 items-end">
             {orderedData.map((item) => {
               const isBest = bestRevenueDay && bestRevenueDay.dayIndex === item.dayIndex && item.grossRevenue > 0
@@ -138,23 +138,32 @@ Ticket Médio: ${formatCurrency(item.avgTicket)}
 Participação: ${formatPercent(item.percentage, 2)}`}
                 >
                   {/* Faturamento Acima da Barra */}
-                  <div className="mb-1.5 min-h-[30px] flex flex-col items-center justify-end">
+                  <div className="mb-1.5 min-h-[28px] sm:min-h-[30px] flex flex-col items-center justify-end">
                     {isBest && (
-                      <span className="px-1 py-0.2 rounded-full bg-amber-500 text-white text-[8px] sm:text-[9px] font-bold shadow-xs mb-0.5 flex items-center gap-0.5">
+                      <span className="px-1 py-0.2 rounded-full bg-amber-500 text-white text-[7.5px] sm:text-[9px] font-bold shadow-xs mb-0.5 flex items-center gap-0.5">
                         <Trophy className="w-2 h-2" />
                         Top 1
                       </span>
                     )}
-                    <span className="font-mono font-bold text-[10px] sm:text-[11px] text-slate-800 dark:text-slate-200 block truncate max-w-full">
-                      {item.grossRevenue > 0 ? formatCurrency(item.grossRevenue) : 'R$ 0'}
+                    <span className="font-mono font-bold text-[8.5px] sm:text-[10px] md:text-[11px] text-slate-800 dark:text-slate-200 block truncate max-w-full">
+                      {item.grossRevenue >= 1000 ? (
+                        <>
+                          <span className="sm:hidden">{`R$ ${(item.grossRevenue / 1000).toFixed(item.grossRevenue >= 10000 ? 0 : 1)}k`}</span>
+                          <span className="hidden sm:inline">{formatCurrency(item.grossRevenue)}</span>
+                        </>
+                      ) : item.grossRevenue > 0 ? (
+                        formatCurrency(item.grossRevenue)
+                      ) : (
+                        'R$ 0'
+                      )}
                     </span>
-                    <span className="font-mono text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 block">
-                      {formatPercent(item.percentage, 2)}
+                    <span className="font-mono text-[8px] sm:text-[10px] text-slate-400 dark:text-slate-500 block">
+                      {formatPercent(item.percentage, 1)}
                     </span>
                   </div>
 
                   {/* Trilha e Barra Vertical Fina/Esbelta */}
-                  <div className="w-5 sm:w-8 md:w-9 h-24 sm:h-32 bg-slate-200/60 dark:bg-slate-800/80 rounded-t-md p-0.5 flex items-end overflow-hidden transition-all group-hover:bg-slate-300/60 dark:group-hover:bg-slate-700/80">
+                  <div className="w-4 sm:w-8 md:w-9 h-20 sm:h-32 bg-slate-200/60 dark:bg-slate-800/80 rounded-t-md p-0.5 flex items-end overflow-hidden transition-all group-hover:bg-slate-300/60 dark:group-hover:bg-slate-700/80">
                     <div
                       className={`w-full rounded-t-sm transition-all duration-500 ${
                         isBest
@@ -168,14 +177,15 @@ Participação: ${formatPercent(item.percentage, 2)}`}
                   </div>
 
                   {/* Rótulo do Dia da Semana Abaixo */}
-                  <div className="mt-2 pt-1 border-t border-slate-200/80 dark:border-slate-800 w-full">
-                    <span className={`block text-xs sm:text-sm font-bold ${
+                  <div className="mt-1.5 sm:mt-2 pt-1 border-t border-slate-200/80 dark:border-slate-800 w-full">
+                    <span className={`block text-[11px] sm:text-sm font-bold ${
                       isBest ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200'
                     }`}>
                       {item.shortName}
                     </span>
-                    <span className="block text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                      {item.salesCount} {item.salesCount === 1 ? 'venda' : 'vendas'}
+                    <span className="block text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                      <span className="sm:hidden">{item.salesCount} ped.</span>
+                      <span className="hidden sm:inline">{item.salesCount} {item.salesCount === 1 ? 'venda' : 'vendas'}</span>
                     </span>
                     <span className="hidden md:block text-[9px] text-slate-400 font-mono mt-0.5 truncate">
                       {item.salesCount > 0 ? formatCurrency(item.avgTicket) : '—'}
@@ -189,7 +199,7 @@ Participação: ${formatPercent(item.percentage, 2)}`}
       ) : (
         /* 2. VISÃO DE TABELA DETALHADA */
         <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
+          <table className="w-full min-w-[540px] text-xs text-left">
             <thead className="bg-slate-50 dark:bg-[#061224] text-slate-500 dark:text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-200 dark:border-[#142C52]">
               <tr>
                 <th className="py-2 px-3">Dia da Semana</th>

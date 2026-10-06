@@ -25,11 +25,11 @@ export function SourceDistributionCard({
   loading = false,
 }: SourceDistributionProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-5">
       {/* Vendas por Fonte de Tráfego / UTM Source */}
-      <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-3">
+      <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-3.5 sm:p-5 shadow-sm space-y-3">
         <div className="flex items-center gap-2">
-          <Link2 className="w-4 h-4 text-blue-500" />
+          <Link2 className="w-4 h-4 text-blue-500 shrink-0" />
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
             Vendas por Fonte de Tráfego (UTM)
           </h3>
@@ -54,13 +54,13 @@ export function SourceDistributionCard({
                   key={`${displayName}-${index}`}
                   className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#061224] border border-slate-100 dark:border-[#142C52]/60 text-xs"
                 >
-                  <div>
-                    <p className="font-bold text-slate-800 dark:text-slate-200 capitalize">
+                  <div className="min-w-0 pr-2">
+                    <p className="font-bold text-slate-800 dark:text-slate-200 capitalize truncate" title={displayName}>
                       {displayName}
                     </p>
                     <p className="text-[10px] text-slate-400">{formatNumber(item.count)} venda(s)</p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <p className="font-mono font-bold text-slate-900 dark:text-white">
                       {formatCurrency(item.revenue)}
                     </p>
@@ -76,9 +76,9 @@ export function SourceDistributionCard({
       </div>
 
       {/* Vendas por Plataforma de Checkout */}
-      <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-3">
+      <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-3.5 sm:p-5 shadow-sm space-y-3">
         <div className="flex items-center gap-2">
-          <Layers className="w-4 h-4 text-indigo-500" />
+          <Layers className="w-4 h-4 text-indigo-500 shrink-0" />
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
             Vendas por Plataforma (Checkout)
           </h3>

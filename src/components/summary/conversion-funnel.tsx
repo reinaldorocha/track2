@@ -156,10 +156,10 @@ export function ConversionFunnel({ data, loading = false }: ConversionFunnelProp
   ];
 
   return (
-    <div className="bg-white dark:bg-[#081A33] rounded-2xl border border-slate-200/90 dark:border-[#142C52] p-6 shadow-sm">
+    <div className="bg-white dark:bg-[#081A33] rounded-2xl border border-slate-200/90 dark:border-[#142C52] p-3.5 sm:p-5 shadow-sm">
       {/* Header com título e ícone de informação */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-bold text-slate-900 dark:text-white">
+      <div className="flex items-center justify-between mb-3 sm:mb-4">
+        <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
           Funil de Conversão (Meta Ads)
         </h3>
         <div
@@ -170,33 +170,39 @@ export function ConversionFunnel({ data, loading = false }: ConversionFunnelProp
         </div>
       </div>
 
+      {/* Dica de rolagem no mobile */}
+      <div className="flex items-center justify-between sm:hidden mb-2 text-[10px] text-slate-400 font-medium px-1">
+        <span>Toque e deslize para ver todas as etapas</span>
+        <span className="text-blue-500 font-bold">➔</span>
+      </div>
+
       {/* Container do Funil */}
-      <div className="relative w-full overflow-x-auto">
-        <div className="min-w-[640px]">
+      <div className="relative w-full overflow-x-auto pb-1">
+        <div className="min-w-[500px]">
           {/* Grid de 5 colunas com divisões verticais contínuas */}
           <div className="relative grid grid-cols-5 divide-x divide-slate-200/80 dark:divide-slate-800/80">
             {steps.map((step) => (
               <div
                 key={step.id}
-                className="relative z-10 flex flex-col justify-between py-2 text-center pointer-events-none"
+                className="relative z-10 flex flex-col justify-between py-1.5 sm:py-2 text-center pointer-events-none"
               >
                 {/* Título da etapa */}
-                <div className="pb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">
+                <div className="pb-2 sm:pb-3 text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200 truncate px-1">
                   {step.title}
                 </div>
 
                 {/* Espaço reservado para o SVG do funil fluido */}
-                <div className="h-32 sm:h-36" />
+                <div className="h-28 sm:h-36" />
 
                 {/* Quantidade na base */}
-                <div className="pt-3 font-mono font-bold text-base text-slate-900 dark:text-white">
+                <div className="pt-2 sm:pt-3 font-mono font-bold text-xs sm:text-base text-slate-900 dark:text-white">
                   {formatNumber(step.count)}
                 </div>
               </div>
             ))}
 
             {/* SVG do Funil Fluido Contínuo sobreposto na área central */}
-            <div className="absolute inset-x-0 top-9 bottom-9 flex items-center justify-center pointer-events-none z-20">
+            <div className="absolute inset-x-0 top-8 sm:top-9 bottom-8 sm:bottom-9 flex items-center justify-center pointer-events-none z-20">
               <svg
                 viewBox="0 0 1000 160"
                 preserveAspectRatio="none"

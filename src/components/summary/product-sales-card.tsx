@@ -27,10 +27,10 @@ export function ProductSalesCard({ products = [], loading = false }: ProductSale
   )
 
   return (
-    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-5 shadow-sm space-y-4">
+    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-3.5 sm:p-5 shadow-sm space-y-3.5 sm:space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-xl">
+          <div className="p-2 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-xl shrink-0">
             <Package className="w-5 h-5" />
           </div>
           <div>
@@ -47,7 +47,7 @@ export function ProductSalesCard({ products = [], loading = false }: ProductSale
         </div>
 
         {/* Busca rápida */}
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
             type="text"
@@ -72,66 +72,111 @@ export function ProductSalesCard({ products = [], loading = false }: ProductSale
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 dark:bg-[#061224] text-slate-500 dark:text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-200 dark:border-[#142C52]">
-              <tr>
-                <th className="py-2.5 px-3">Produto</th>
-                <th className="py-2.5 px-3 text-center">Vendas</th>
-                <th className="py-2.5 px-3 text-right">Faturamento Bruto</th>
-                <th className="py-2.5 px-3 text-right">Líquido</th>
-                <th className="py-2.5 px-3 text-right">Ticket Médio</th>
-                <th className="py-2.5 px-3 text-right w-36">Participação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-[#142C52] text-slate-700 dark:text-slate-300">
-              {filtered.map((prod, idx) => (
-                <tr
-                  key={prod.id || idx}
-                  className="hover:bg-slate-50/70 dark:hover:bg-[#0d223f] transition-colors"
-                >
-                  <td className="py-3 px-3 font-semibold text-slate-900 dark:text-white max-w-[280px]">
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-500">
-                        {idx + 1}
-                      </span>
-                      <span className="truncate" title={prod.name}>
-                        {prod.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-3 px-3 text-center font-bold">
-                    <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 text-[11px]">
-                      {formatNumber(prod.salesCount)}
+        <>
+          {/* Visualização Mobile (< sm): Lista de cards compactos e legíveis */}
+          <div className="sm:hidden space-y-2.5 divide-y divide-slate-100 dark:divide-[#142C52]">
+            {filtered.map((prod, idx) => (
+              <div key={prod.id || idx} className="pt-2.5 first:pt-0 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="w-5 h-5 shrink-0 flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-500">
+                      {idx + 1}
                     </span>
-                  </td>
-                  <td className="py-3 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                    {formatCurrency(prod.grossRevenue)}
-                  </td>
-                  <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                    {formatCurrency(prod.netRevenue)}
-                  </td>
-                  <td className="py-3 px-3 text-right font-mono font-medium">
-                    {formatCurrency(prod.avgTicket)}
-                  </td>
-                  <td className="py-3 px-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <div className="w-16 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-blue-500 rounded-full"
-                          style={{ width: `${Math.min(Number(prod.percentage) || 0, 100)}%` }}
-                        />
-                      </div>
-                      <span className="font-mono font-semibold text-[11px] min-w-[3.5rem] text-right">
-                        {formatPercent(Number(prod.percentage) || 0, 2)}
-                      </span>
-                    </div>
-                  </td>
+                    <span className="font-semibold text-xs text-slate-900 dark:text-white truncate" title={prod.name}>
+                      {prod.name}
+                    </span>
+                  </div>
+                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 text-[10px] font-bold font-mono">
+                    {formatNumber(prod.salesCount)} {prod.salesCount === 1 ? 'venda' : 'vendas'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 bg-slate-50 dark:bg-[#061224] p-2 rounded-lg border border-slate-100 dark:border-[#142C52]/60 text-xs">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Faturamento</span>
+                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-[11px] truncate block">
+                      {formatCurrency(prod.grossRevenue)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Ticket Médio</span>
+                    <span className="font-mono font-medium text-slate-700 dark:text-slate-300 text-[11px] truncate block">
+                      {formatCurrency(prod.avgTicket)}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Part.</span>
+                    <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-[11px] block">
+                      {formatPercent(Number(prod.percentage) || 0, 1)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Visualização Desktop (>= sm): Tabela completa */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 dark:bg-[#061224] text-slate-500 dark:text-slate-400 uppercase font-bold text-[10px] tracking-wider border-b border-slate-200 dark:border-[#142C52]">
+                <tr>
+                  <th className="py-2.5 px-3">Produto</th>
+                  <th className="py-2.5 px-3 text-center">Vendas</th>
+                  <th className="py-2.5 px-3 text-right">Faturamento Bruto</th>
+                  <th className="py-2.5 px-3 text-right">Líquido</th>
+                  <th className="py-2.5 px-3 text-right">Ticket Médio</th>
+                  <th className="py-2.5 px-3 text-right w-36">Participação</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-[#142C52] text-slate-700 dark:text-slate-300">
+                {filtered.map((prod, idx) => (
+                  <tr
+                    key={prod.id || idx}
+                    className="hover:bg-slate-50/70 dark:hover:bg-[#0d223f] transition-colors"
+                  >
+                    <td className="py-3 px-3 font-semibold text-slate-900 dark:text-white max-w-[280px]">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-500">
+                          {idx + 1}
+                        </span>
+                        <span className="truncate" title={prod.name}>
+                          {prod.name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 text-center font-bold">
+                      <span className="px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 text-[11px]">
+                        {formatNumber(prod.salesCount)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(prod.grossRevenue)}
+                    </td>
+                    <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
+                      {formatCurrency(prod.netRevenue)}
+                    </td>
+                    <td className="py-3 px-3 text-right font-mono font-medium">
+                      {formatCurrency(prod.avgTicket)}
+                    </td>
+                    <td className="py-3 px-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="w-16 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-500 rounded-full"
+                            style={{ width: `${Math.min(Number(prod.percentage) || 0, 100)}%` }}
+                          />
+                        </div>
+                        <span className="font-mono font-semibold text-[11px] min-w-[3.5rem] text-right">
+                          {formatPercent(Number(prod.percentage) || 0, 2)}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )

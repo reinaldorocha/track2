@@ -74,8 +74,8 @@ export function HourlyRevenueChart({ data = [], loading = false }: HourlyRevenue
   };
 
   return (
-    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-3.5 sm:p-5 shadow-sm space-y-3.5 sm:space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
         <div>
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
             Faturamento x Investimento x Lucro por Hora
@@ -86,12 +86,12 @@ export function HourlyRevenueChart({ data = [], loading = false }: HourlyRevenue
         </div>
 
         {/* Controles do Gráfico */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {/* Toggle Bruto/Líquido */}
-          <div className="flex items-center bg-slate-100 dark:bg-[#060E1C] p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
+          <div className="flex items-center bg-slate-100 dark:bg-[#060E1C] p-0.5 sm:p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
             <button
               onClick={() => setRevenueType("gross")}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
                 revenueType === "gross"
                   ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                   : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -101,7 +101,7 @@ export function HourlyRevenueChart({ data = [], loading = false }: HourlyRevenue
             </button>
             <button
               onClick={() => setRevenueType("net")}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
                 revenueType === "net"
                   ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                   : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -112,10 +112,10 @@ export function HourlyRevenueChart({ data = [], loading = false }: HourlyRevenue
           </div>
 
           {/* Toggle Acumulado/Hora a Hora */}
-          <div className="flex items-center bg-slate-100 dark:bg-[#060E1C] p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
+          <div className="flex items-center bg-slate-100 dark:bg-[#060E1C] p-0.5 sm:p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
             <button
               onClick={() => setIsCumulative(true)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
                 isCumulative
                   ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                   : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -125,7 +125,7 @@ export function HourlyRevenueChart({ data = [], loading = false }: HourlyRevenue
             </button>
             <button
               onClick={() => setIsCumulative(false)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
                 !isCumulative
                   ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                   : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -138,13 +138,13 @@ export function HourlyRevenueChart({ data = [], loading = false }: HourlyRevenue
       </div>
 
       {loading ? (
-        <div className="h-64 flex items-center justify-center bg-slate-50 dark:bg-[#060E1C] rounded-xl animate-pulse">
+        <div className="h-60 sm:h-72 flex items-center justify-center bg-slate-50 dark:bg-[#060E1C] rounded-xl animate-pulse">
           <span className="text-xs text-slate-400">Carregando métricas temporais...</span>
         </div>
       ) : (
-        <div className="h-72 w-full">
+        <div className="h-60 sm:h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={formattedData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <AreaChart data={formattedData} margin={{ top: 10, right: 10, left: -16, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorFat" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#0066FF" stopOpacity={0.3} />

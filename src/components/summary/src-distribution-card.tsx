@@ -21,14 +21,14 @@ export function SrcDistributionCard({ data = [], loading = false }: SrcDistribut
   const totalRevenue = data.reduce((acc, item) => acc + item.revenue, 0)
 
   return (
-    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-5 shadow-sm space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-3.5 sm:p-5 shadow-sm space-y-3.5 sm:space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-xl">
+          <div className="p-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-xl shrink-0">
             <Link2 className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
               Vendas por SRC (Sub-origem)
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
                 {data.length} tags
@@ -40,7 +40,7 @@ export function SrcDistributionCard({ data = [], loading = false }: SrcDistribut
           </div>
         </div>
 
-        <div className="text-right hidden sm:block">
+        <div className="flex items-center justify-between sm:block text-left sm:text-right border-t sm:border-t-0 pt-1.5 sm:pt-0 border-slate-100 dark:border-slate-800">
           <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Rastreado</span>
           <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
             {formatCurrency(totalRevenue)}

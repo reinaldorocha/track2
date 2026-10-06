@@ -39,19 +39,19 @@ export function SalesByCountry({ data = [], loading = false }: SalesByCountryPro
   };
 
   return (
-    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
-      <div className="flex items-center justify-between">
+    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-3.5 sm:p-5 shadow-sm space-y-3.5 sm:space-y-4 flex flex-col justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Globe className="w-4 h-4 text-blue-500" />
+          <Globe className="w-4 h-4 text-blue-500 shrink-0" />
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
             Vendas por País
           </h3>
         </div>
 
-        <div className="flex items-center bg-slate-100 dark:bg-[#060E1C] p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
+        <div className="flex items-center bg-slate-100 dark:bg-[#060E1C] p-0.5 sm:p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
           <button
             onClick={() => setViewMode("ranking")}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
               viewMode === "ranking"
                 ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                 : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -61,7 +61,7 @@ export function SalesByCountry({ data = [], loading = false }: SalesByCountryPro
           </button>
           <button
             onClick={() => setViewMode("map")}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
               viewMode === "map"
                 ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                 : "text-slate-500 hover:text-slate-800 dark:text-slate-400"

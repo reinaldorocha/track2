@@ -620,31 +620,31 @@ export default function DashboardPage() {
   const activeWidgetsCount = Object.values(visibleWidgets).filter(Boolean).length
 
   return (
-    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+    <div className="p-3 sm:p-4 md:p-6 space-y-4 sm:space-y-6 max-w-[1600px] mx-auto">
       {/* 1. Header com Título, Seletor de Período e Botão Personalizar Quadros */}
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Dashboard Geral da Operação</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">Dashboard Geral da Operação</h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Consolidação analítica de tráfego, anúncios, checkouts, vendas e rentabilidade
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
             {/* Seletor Rápido de Layouts Pré-definidos */}
             <div className="flex items-center bg-slate-100 dark:bg-[#061224] p-1 rounded-xl border border-slate-200 dark:border-[#142C52] text-xs">
               <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 px-2 hidden lg:inline">
                 Layout:
               </span>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5 sm:gap-1">
                 {PREDEFINED_LAYOUTS.map((layout) => {
                   const isSelected = activeLayout === layout.id
                   return (
                     <button
                       key={layout.id}
                       onClick={() => handleApplyPresetDirect(layout.id)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                      className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1 sm:gap-1.5 ${
                         isSelected
                           ? 'bg-white dark:bg-[#0E2547] text-blue-600 dark:text-blue-400 shadow-sm font-bold border border-slate-200/80 dark:border-blue-900/60'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -667,12 +667,13 @@ export default function DashboardPage() {
             {/* Botão Personalizar Quadros estilo UTMFY */}
             <button
               onClick={() => setIsCustomizeModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/80 dark:hover:bg-blue-900 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-xl shadow-sm transition-all"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/80 dark:hover:bg-blue-900 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-xl shadow-sm transition-all"
               title="Personalizar quais quadros aparecem na tela"
             >
-              <Sliders className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Personalizar Quadros</span>
-              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-blue-600 text-white font-mono">
+              <Sliders className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span className="hidden sm:inline">Personalizar Quadros</span>
+              <span className="sm:hidden">Quadros</span>
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] bg-blue-600 text-white font-mono">
                 {activeWidgetsCount}
               </span>
             </button>
@@ -680,7 +681,7 @@ export default function DashboardPage() {
             {/* Botão Mover / Reorganizar Cards */}
             <button
               onClick={() => setIsReorderMode(!isReorderMode)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border shadow-sm transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-semibold rounded-xl border shadow-sm transition-all ${
                 isReorderMode
                   ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 font-bold shadow-md ring-2 ring-amber-300 dark:ring-amber-800'
                   : 'bg-white hover:bg-slate-50 dark:bg-[#081A33] dark:hover:bg-[#142C52] border-slate-200 dark:border-[#142C52] text-slate-700 dark:text-slate-300'
@@ -690,12 +691,13 @@ export default function DashboardPage() {
               {isReorderMode ? (
                 <>
                   <Check className="w-3.5 h-3.5" />
-                  <span>Concluir Ordem</span>
+                  <span>Concluir</span>
                 </>
               ) : (
                 <>
-                  <Move className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Mover Cards</span>
+                  <Move className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="hidden sm:inline">Mover Cards</span>
+                  <span className="sm:hidden">Mover</span>
                 </>
               )}
             </button>
@@ -703,24 +705,24 @@ export default function DashboardPage() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-[#081A33] border border-slate-200 dark:border-[#142C52] text-xs font-semibold text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] shadow-sm transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-white dark:bg-[#081A33] border border-slate-200 dark:border-[#142C52] text-xs font-semibold text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-[#142C52] shadow-sm transition-colors disabled:opacity-50"
               title="Atualizar dados"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
-              <span>Atualizar</span>
+              <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isFetching ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+              <span className="hidden sm:inline">Atualizar</span>
             </button>
           </div>
         </div>
 
         {/* Barra de Filtros Operacionais */}
-        <div className="flex flex-wrap items-center gap-2 p-3 bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl shadow-sm text-xs">
+        <div className="flex flex-wrap items-center gap-2 p-2.5 sm:p-3 bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl shadow-sm text-xs">
           {/* Filtro: Conta de Anúncios */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500 dark:text-slate-400 font-medium">Conta:</span>
+          <div className="flex items-center gap-1.5 flex-1 sm:flex-initial min-w-[130px]">
+            <span className="text-slate-500 dark:text-slate-400 font-medium shrink-0">Conta:</span>
             <select
               value={selectedAdAccount}
               onChange={(e) => setSelectedAdAccount(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="all">Todas as Contas</option>
               {adAccounts.map((acc: { id: string; name: string; externalId: string }) => (
@@ -732,12 +734,12 @@ export default function DashboardPage() {
           </div>
 
           {/* Filtro: Plataforma */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500 dark:text-slate-400 font-medium">Plataforma:</span>
+          <div className="flex items-center gap-1.5 flex-1 sm:flex-initial min-w-[130px]">
+            <span className="text-slate-500 dark:text-slate-400 font-medium shrink-0">Plat.:</span>
             <select
               value={selectedPlatform}
               onChange={(e) => setSelectedPlatform(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="all">Todas as Plataformas</option>
               <option value="hotmart">Hotmart</option>
@@ -751,12 +753,12 @@ export default function DashboardPage() {
           </div>
 
           {/* Filtro: Fonte de Tráfego */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500 dark:text-slate-400 font-medium">Fonte:</span>
+          <div className="flex items-center gap-1.5 flex-1 sm:flex-initial min-w-[130px]">
+            <span className="text-slate-500 dark:text-slate-400 font-medium shrink-0">Fonte:</span>
             <select
               value={selectedTrafficSource}
               onChange={(e) => setSelectedTrafficSource(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-slate-50 dark:bg-[#061224] border border-slate-200 dark:border-[#142C52] rounded-lg text-slate-800 dark:text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="all">Todas as Fontes</option>
               <option value="facebook">Facebook / Meta Ads</option>
@@ -832,7 +834,7 @@ export default function DashboardPage() {
       )}
 
       {/* 2. Grade de Indicadores Personalizáveis Reordenáveis (Cards estilo UTMFY) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 sm:gap-3.5">
         {kpiOrder.map((id, index) => {
           if (visibleWidgets[id] === false) return null
           const cardContent = renderKpiCard(id)
@@ -904,7 +906,7 @@ export default function DashboardPage() {
 
       {/* 6. Gráficos Temporais 24h: Faturamento x Investimento x Lucro & Lucro por Horário */}
       {(visibleWidgets.hourlyRevenueChart !== false || visibleWidgets.hourlyProfitChart !== false) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-5">
           {visibleWidgets.hourlyRevenueChart !== false && (
             <HourlyRevenueChart data={data?.hourlyData} loading={isLoading} />
           )}
@@ -915,7 +917,7 @@ export default function DashboardPage() {
       )}
 
       {/* 7. Vendas por Pagamento (Pix, Cartão, Boleto) & Vendas por SRC */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-5">
         {visibleWidgets.paymentMethods !== false && (
           <PaymentMethodsCard data={data?.paymentDistribution} loading={isLoading} />
         )}
@@ -925,7 +927,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 8. Vendas por País & Distribuição por Origem / Plataforma */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-5">
         {visibleWidgets.salesByCountry !== false && (
           <div className="lg:col-span-1">
             <SalesByCountry data={data?.countryDistribution} loading={isLoading} />

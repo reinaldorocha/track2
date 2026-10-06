@@ -74,8 +74,8 @@ export function HourlyProfitChart({ data = [], loading = false }: HourlyProfitCh
   };
 
   return (
-    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-5 shadow-sm space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-3.5 sm:p-5 shadow-sm space-y-3.5 sm:space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
         <div>
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
             Lucro por Horário (00:00 às 23:00)
@@ -85,10 +85,10 @@ export function HourlyProfitChart({ data = [], loading = false }: HourlyProfitCh
           </p>
         </div>
 
-        <div className="flex items-center bg-slate-100 dark:bg-[#060E1C] p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
+        <div className="flex items-center self-start sm:self-auto bg-slate-100 dark:bg-[#060E1C] p-0.5 sm:p-1 rounded-lg border border-slate-200 dark:border-[#142C52]">
           <button
             onClick={() => setFilterType("liquid")}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+            className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
               filterType === "liquid"
                 ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                 : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -98,7 +98,7 @@ export function HourlyProfitChart({ data = [], loading = false }: HourlyProfitCh
           </button>
           <button
             onClick={() => setFilterType("gross")}
-            className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+            className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-md transition-colors ${
               filterType === "gross"
                 ? "bg-white dark:bg-[#142C52] text-blue-600 dark:text-blue-300 shadow-sm"
                 : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
@@ -114,9 +114,9 @@ export function HourlyProfitChart({ data = [], loading = false }: HourlyProfitCh
           <span className="text-xs text-slate-400">Carregando lucros horários...</span>
         </div>
       ) : (
-        <div className="h-56 w-full">
+        <div className="h-52 sm:h-56 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={formattedData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <BarChart data={formattedData} margin={{ top: 10, right: 10, left: -16, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.3} vertical={false} />
               <XAxis
                 dataKey="hour"

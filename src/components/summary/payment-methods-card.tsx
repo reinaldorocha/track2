@@ -52,7 +52,7 @@ export function PaymentMethodsCard({ data = [], loading = false }: PaymentMethod
   }
 
   return (
-    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-5 shadow-sm space-y-4">
+    <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-2xl p-3.5 sm:p-5 shadow-sm space-y-3.5 sm:space-y-4">
       <div>
         <h3 className="text-sm font-bold text-slate-900 dark:text-white">
           Vendas por Método de Pagamento &amp; Taxa de Aprovação
@@ -63,7 +63,7 @@ export function PaymentMethodsCard({ data = [], loading = false }: PaymentMethod
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 animate-pulse">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3.5 animate-pulse">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-28 bg-slate-100 dark:bg-slate-800/60 rounded-xl" />
           ))}
@@ -75,11 +75,11 @@ export function PaymentMethodsCard({ data = [], loading = false }: PaymentMethod
       ) : (
         <div className={`grid grid-cols-1 ${
           methods.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2 lg:grid-cols-4'
-        } gap-3.5`}>
+        } gap-2.5 sm:gap-3.5`}>
           {methods.map((item, index) => (
             <div
               key={`${item.name}-${index}`}
-              className="p-4 rounded-xl border border-slate-200 dark:border-[#142C52] bg-slate-50/70 dark:bg-[#061224] flex flex-col justify-between space-y-3"
+              className="p-3 sm:p-4 rounded-xl border border-slate-200 dark:border-[#142C52] bg-slate-50/70 dark:bg-[#061224] flex flex-col justify-between space-y-2.5 sm:space-y-3"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-bold text-xs text-slate-800 dark:text-slate-200">
@@ -92,10 +92,10 @@ export function PaymentMethodsCard({ data = [], loading = false }: PaymentMethod
               </div>
 
               <div>
-                <p className="text-lg sm:text-xl font-bold font-mono text-slate-900 dark:text-white">
+                <p className="text-base sm:text-xl font-bold font-mono text-slate-900 dark:text-white">
                   {formatCurrency(item.gross)}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">
                   {formatNumber(item.approved)}/{formatNumber(item.count)} pedidos
                 </p>
               </div>
