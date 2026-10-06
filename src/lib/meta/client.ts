@@ -47,6 +47,38 @@ export class MetaApiError extends Error {
   }
 }
 
+export function isStandardEnhancementsError(err: unknown): boolean {
+  if (!err) return false
+  if (err instanceof MetaApiError) {
+    if (err.subcode === 3858504) return true
+    const msg = (err.message || '').toLowerCase()
+    return (
+      msg.includes('aprimoramentos padrão') ||
+      msg.includes('aprimoramentos padrao') ||
+      msg.includes('standard enhancements') ||
+      msg.includes('standard_enhancements') ||
+      msg.includes('degrees_of_freedom') ||
+      msg.includes('creative_features_spec') ||
+      msg.includes('hyth50xo') ||
+      (err.code === 100 && msg.includes('descontinuado'))
+    )
+  }
+  if (err instanceof Error) {
+    const msg = (err.message || '').toLowerCase()
+    return (
+      msg.includes('aprimoramentos padrão') ||
+      msg.includes('aprimoramentos padrao') ||
+      msg.includes('standard enhancements') ||
+      msg.includes('standard_enhancements') ||
+      msg.includes('degrees_of_freedom') ||
+      msg.includes('creative_features_spec') ||
+      msg.includes('hyth50xo') ||
+      msg.includes('descontinuado')
+    )
+  }
+  return false
+}
+
 export class MetaApiClient {
   constructor(private accessToken: string) {}
   
@@ -218,7 +250,7 @@ export class MetaApiClient {
 
   async duplicateCampaign(
     campaignId: string,
-    options: { deepCopy?: boolean; status?: string; suffix?: string } = {}
+    options: { deepCopy?: boolean; status?: string; suffix?: string; accountId?: string } = {}
   ) {
     const id = campaignId.replace(/^act_/, '')
     const deepCopy = options.deepCopy !== false
@@ -237,24 +269,119 @@ export class MetaApiClient {
         45000
       )
     } catch (err: unknown) {
+      if (isStandardEnhancementsError(err)) {
+        console.warn(`[Meta Duplicate] Aprimoramento padrão descontinuado ao duplicar campanha ${id}. Usando fallback resiliente...`)
+        return await this.duplicateCampaignWithExistingCreatives(id, options)
+      }
       if (err instanceof MetaApiError && (err.code === 100 || /rename|param/i.test(err.message))) {
-        return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
-          `/${id}/copies`,
-          {
-            deep_copy: deepCopy,
-            status_option: statusOption,
-          },
-          {},
-          45000
-        )
+        try {
+          return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+            `/${id}/copies`,
+            {
+              deep_copy: deepCopy,
+              status_option: statusOption,
+            },
+            {},
+            45000
+          )
+        } catch (retryErr: unknown) {
+          if (isStandardEnhancementsError(retryErr)) {
+            console.warn(`[Meta Duplicate] Aprimoramento padrão descontinuado ao duplicar campanha ${id} (retry). Usando fallback resiliente...`)
+            return await this.duplicateCampaignWithExistingCreatives(id, options)
+          }
+          throw retryErr
+        }
       }
       throw err
     }
   }
 
+  private async duplicateCampaignWithExistingCreatives(
+    campaignId: string,
+    options: { status?: string; suffix?: string; accountId?: string }
+  ) {
+    const id = campaignId.replace(/^act_/, '')
+    const statusOption = options.status || 'PAUSED'
+    const suffix = options.suffix || ' - Cópia'
+
+    // 1. Duplica apenas o container da campanha (deep_copy: false não aciona validação de criativos legados)
+    let copyRes: { id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }
+    try {
+      copyRes = await this.post(
+        `/${id}/copies`,
+        {
+          deep_copy: false,
+          status_option: statusOption,
+          rename_suffix: suffix,
+          rename_options: { rename_strategy: 'DEEP_RENAME' },
+        },
+        {},
+        45000
+      )
+    } catch {
+      copyRes = await this.post(
+        `/${id}/copies`,
+        {
+          deep_copy: false,
+          status_option: statusOption,
+        },
+        {},
+        45000
+      )
+    }
+
+    const rawCopy = copyRes as Record<string, unknown>
+    const newCampaignId = (
+      copyRes.id ||
+      copyRes.copied_id ||
+      copyRes.copied_parent_id ||
+      (Array.isArray(rawCopy.campaigns) ? (rawCopy.campaigns as Array<{ id: string }>)[0]?.id : undefined)
+    ) as string | undefined
+
+    if (!newCampaignId) return copyRes
+
+    // 2. Determina o accountId
+    let actId = options.accountId ? options.accountId.replace(/^act_/, '') : null
+    if (!actId) {
+      try {
+        const campData = await this.get<{ account_id?: string }>(`/${id}`, { fields: 'account_id' })
+        if (campData?.account_id) actId = campData.account_id.replace(/^act_/, '')
+      } catch (err) {
+        console.warn(`[Meta Duplicate] Não foi possível obter account_id da campanha ${id}:`, err)
+      }
+    }
+
+    // 3. Busca conjuntos de anúncios da campanha original
+    try {
+      const adSets = await this.get<{ data: Array<{ id: string; name: string }> }>(
+        `/${id}/adsets`,
+        { fields: 'id,name', limit: '100' }
+      )
+
+      if (adSets?.data && adSets.data.length > 0) {
+        for (const adset of adSets.data) {
+          try {
+            await this.duplicateAdSetWithExistingCreatives(adset.id, {
+              status: statusOption,
+              suffix,
+              accountId: actId || options.accountId,
+              targetCampaignId: newCampaignId,
+            })
+          } catch (adSetErr) {
+            console.warn(`[Meta Duplicate] Falha ao duplicar conjunto ${adset.id} para nova campanha ${newCampaignId}:`, adSetErr)
+          }
+        }
+      }
+    } catch (adSetsErr) {
+      console.warn(`[Meta Duplicate] Falha ao listar conjuntos da campanha ${id}:`, adSetsErr)
+    }
+
+    return copyRes
+  }
+
   async duplicateAdSet(
     adSetId: string,
-    options: { deepCopy?: boolean; status?: string; suffix?: string } = {}
+    options: { deepCopy?: boolean; status?: string; suffix?: string; accountId?: string; targetCampaignId?: string } = {}
   ) {
     const id = adSetId.replace(/^act_/, '')
     const deepCopy = options.deepCopy !== false
@@ -268,29 +395,129 @@ export class MetaApiClient {
           status_option: statusOption,
           rename_suffix: suffix,
           rename_options: { rename_strategy: 'DEEP_RENAME' },
+          ...(options.targetCampaignId ? { campaign_id: options.targetCampaignId } : {}),
         },
         {},
         45000
       )
     } catch (err: unknown) {
+      if (isStandardEnhancementsError(err)) {
+        console.warn(`[Meta Duplicate] Aprimoramento padrão descontinuado ao duplicar conjunto ${id}. Usando fallback resiliente...`)
+        return await this.duplicateAdSetWithExistingCreatives(id, options)
+      }
       if (err instanceof MetaApiError && (err.code === 100 || /rename|param/i.test(err.message))) {
-        return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
-          `/${id}/copies`,
-          {
-            deep_copy: deepCopy,
-            status_option: statusOption,
-          },
-          {},
-          45000
-        )
+        try {
+          return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+            `/${id}/copies`,
+            {
+              deep_copy: deepCopy,
+              status_option: statusOption,
+              ...(options.targetCampaignId ? { campaign_id: options.targetCampaignId } : {}),
+            },
+            {},
+            45000
+          )
+        } catch (retryErr: unknown) {
+          if (isStandardEnhancementsError(retryErr)) {
+            console.warn(`[Meta Duplicate] Aprimoramento padrão descontinuado ao duplicar conjunto ${id} (retry). Usando fallback resiliente...`)
+            return await this.duplicateAdSetWithExistingCreatives(id, options)
+          }
+          throw retryErr
+        }
       }
       throw err
     }
   }
 
+  private async duplicateAdSetWithExistingCreatives(
+    adSetId: string,
+    options: { status?: string; suffix?: string; accountId?: string; targetCampaignId?: string }
+  ) {
+    const id = adSetId.replace(/^act_/, '')
+    const statusOption = options.status || 'PAUSED'
+    const suffix = options.suffix || ' - Cópia'
+
+    // 1. Duplica apenas o container do conjunto de anúncios sem clonar criativos legados (deep_copy: false)
+    let copyRes: { id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }
+    try {
+      copyRes = await this.post(
+        `/${id}/copies`,
+        {
+          deep_copy: false,
+          status_option: statusOption,
+          rename_suffix: suffix,
+          rename_options: { rename_strategy: 'DEEP_RENAME' },
+          ...(options.targetCampaignId ? { campaign_id: options.targetCampaignId } : {}),
+        },
+        {},
+        45000
+      )
+    } catch {
+      copyRes = await this.post(
+        `/${id}/copies`,
+        {
+          deep_copy: false,
+          status_option: statusOption,
+          ...(options.targetCampaignId ? { campaign_id: options.targetCampaignId } : {}),
+        },
+        {},
+        45000
+      )
+    }
+
+    const rawCopy = copyRes as Record<string, unknown>
+    const newAdSetId = (
+      copyRes.id ||
+      copyRes.copied_id ||
+      copyRes.copied_parent_id ||
+      (Array.isArray(rawCopy.adsets) ? (rawCopy.adsets as Array<{ id: string }>)[0]?.id : undefined)
+    ) as string | undefined
+
+    if (!newAdSetId) return copyRes
+
+    // 2. Determina o accountId
+    let actId = options.accountId ? options.accountId.replace(/^act_/, '') : null
+    if (!actId) {
+      try {
+        const adsetData = await this.get<{ account_id?: string }>(`/${id}`, { fields: 'account_id' })
+        if (adsetData?.account_id) actId = adsetData.account_id.replace(/^act_/, '')
+      } catch (err) {
+        console.warn(`[Meta Duplicate] Não foi possível obter account_id do conjunto ${id}:`, err)
+      }
+    }
+
+    // 3. Busca anúncios do conjunto original
+    try {
+      const ads = await this.get<{ data: Array<{ id: string; name: string; creative?: { id?: string } }> }>(
+        `/${id}/ads`,
+        { fields: 'id,name,creative{id}', limit: '100' }
+      )
+
+      if (ads?.data && ads.data.length > 0 && actId) {
+        for (const ad of ads.data) {
+          if (!ad.creative?.id) continue
+          try {
+            await this.post(`/act_${actId}/ads`, {
+              name: `${ad.name}${suffix}`,
+              adset_id: newAdSetId,
+              status: statusOption,
+              creative: { creative_id: ad.creative.id },
+            })
+          } catch (createAdErr) {
+            console.warn(`[Meta Duplicate] Falha ao recriar anúncio ${ad.id} no conjunto ${newAdSetId}:`, createAdErr)
+          }
+        }
+      }
+    } catch (adsErr) {
+      console.warn(`[Meta Duplicate] Falha ao buscar anúncios do conjunto ${id}:`, adsErr)
+    }
+
+    return copyRes
+  }
+
   async duplicateAd(
     adId: string,
-    options: { status?: string; suffix?: string } = {}
+    options: { status?: string; suffix?: string; accountId?: string } = {}
   ) {
     const id = adId.replace(/^act_/, '')
     const statusOption = options.status || 'PAUSED'
@@ -307,17 +534,68 @@ export class MetaApiClient {
         45000
       )
     } catch (err: unknown) {
+      if (isStandardEnhancementsError(err)) {
+        console.warn(`[Meta Duplicate] Aprimoramento padrão descontinuado ao duplicar anúncio ${id}. Usando fallback resiliente...`)
+        return await this.duplicateAdWithExistingCreative(id, options)
+      }
       if (err instanceof MetaApiError && (err.code === 100 || /rename|param/i.test(err.message))) {
-        return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
-          `/${id}/copies`,
-          {
-            status_option: statusOption,
-          },
-          {},
-          45000
-        )
+        try {
+          return await this.post<{ id?: string; copied_parent_id?: string; copied_id?: string; success?: boolean }>(
+            `/${id}/copies`,
+            {
+              status_option: statusOption,
+            },
+            {},
+            45000
+          )
+        } catch (retryErr: unknown) {
+          if (isStandardEnhancementsError(retryErr)) {
+            console.warn(`[Meta Duplicate] Aprimoramento padrão descontinuado ao duplicar anúncio ${id} (retry). Usando fallback resiliente...`)
+            return await this.duplicateAdWithExistingCreative(id, options)
+          }
+          throw retryErr
+        }
       }
       throw err
+    }
+  }
+
+  private async duplicateAdWithExistingCreative(
+    adId: string,
+    options: { status?: string; suffix?: string; accountId?: string }
+  ) {
+    const id = adId.replace(/^act_/, '')
+    const statusOption = options.status || 'PAUSED'
+    const suffix = options.suffix || ' - Cópia'
+
+    // Busca detalhes do anúncio original
+    const adData = await this.get<{
+      id: string
+      name: string
+      account_id?: string
+      adset_id: string
+      creative?: { id?: string }
+    }>(`/${id}`, { fields: 'id,name,account_id,adset_id,creative{id}' })
+
+    const actId = options.accountId
+      ? options.accountId.replace(/^act_/, '')
+      : adData.account_id ? adData.account_id.replace(/^act_/, '') : null
+
+    if (!actId || !adData.creative?.id || !adData.adset_id) {
+      throw new MetaApiError('Não foi possível obter creative_id, account_id ou adset_id para duplicar o anúncio.')
+    }
+
+    const createdAd = await this.post<{ id: string }>(`/act_${actId}/ads`, {
+      name: `${adData.name}${suffix}`,
+      adset_id: adData.adset_id,
+      status: statusOption,
+      creative: { creative_id: adData.creative.id },
+    })
+
+    return {
+      id: createdAd.id,
+      copied_id: createdAd.id,
+      success: true,
     }
   }
 }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 process.env.AUTH_SECRET = process.env.AUTH_SECRET || 'test_auth_secret_for_meta_management_2025'
 
-import { MetaApiClient } from '../src/lib/meta/client'
+import { MetaApiClient, MetaApiError, isStandardEnhancementsError } from '../src/lib/meta/client'
 import { prisma } from '../src/lib/db'
 
 describe('Meta Ads Management — Edição e Duplicação (Estilo UTMFY)', () => {
@@ -73,6 +73,35 @@ describe('Meta Ads Management — Edição e Duplicação (Estilo UTMFY)', () =>
     assert.equal(extractCopiedId({ adsets: [{ id: '120255555' }] }), '120255555')
     assert.equal(extractCopiedId({ ads: [{ id: '120266666' }] }), '120266666')
     assert.equal(extractCopiedId({}), undefined)
+  })
+
+  // 6. Detecção da descontinuação de standard_enhancements (Aprimoramentos padrão Meta)
+  it('6. isStandardEnhancementsError identifica erro de descontinuação de aprimoramentos padrão', () => {
+    // Erro real recebido pelo usuário
+    const userError = new MetaApiError(
+      'Invalid parameter (O recurso de inclusão do campo de aprimoramentos padrão no criativo foi descontinuado. Defina recursos individuais. Saiba mais aqui: https://fburl.com/hyth50xo)',
+      100,
+      3858504
+    )
+    assert.equal(isStandardEnhancementsError(userError), true)
+
+    // Detecção por subcode mesmo sem mensagem
+    const subcodeError = new MetaApiError('Some error', 100, 3858504)
+    assert.equal(isStandardEnhancementsError(subcodeError), true)
+
+    // Detecção por URL de documentação ou palavras-chave
+    const urlError = new Error('Descontinuado conforme https://fburl.com/hyth50xo')
+    assert.equal(isStandardEnhancementsError(urlError), true)
+
+    const engError = new MetaApiError('The standard_enhancements feature on creative is deprecated', 100)
+    assert.equal(isStandardEnhancementsError(engError), true)
+
+    // Erros normais não devem ser falsos positivos
+    const authError = new MetaApiError('Session expired', 190)
+    assert.equal(isStandardEnhancementsError(authError), false)
+
+    const rateError = new MetaApiError('User request limit reached', 17)
+    assert.equal(isStandardEnhancementsError(rateError), false)
   })
 })
 
