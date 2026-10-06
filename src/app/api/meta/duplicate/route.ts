@@ -21,7 +21,6 @@ export async function POST(req: Request) {
     }
 
     let accountId: string
-    let metaAccountId: string
     let externalId: string
     let token: string | null
     let originalCampaignDbId: string | null = null
@@ -35,7 +34,6 @@ export async function POST(req: Request) {
       })
       if (!item) return NextResponse.json({ error: 'Campanha não encontrada' }, { status: 404 })
       accountId = item.adAccountId
-      metaAccountId = item.adAccount.externalId
       externalId = item.externalId
       token = item.adAccount.accessTokenEnc
       originalCampaignDbId = item.id
@@ -47,7 +45,6 @@ export async function POST(req: Request) {
       })
       if (!item) return NextResponse.json({ error: 'Conjunto não encontrado' }, { status: 404 })
       accountId = item.campaign.adAccountId
-      metaAccountId = item.campaign.adAccount.externalId
       externalId = item.externalId
       token = item.campaign.adAccount.accessTokenEnc
       originalCampaignDbId = item.campaignId
@@ -60,7 +57,6 @@ export async function POST(req: Request) {
       })
       if (!item) return NextResponse.json({ error: 'Anúncio não encontrado' }, { status: 404 })
       accountId = item.adSet.campaign.adAccountId
-      metaAccountId = item.adSet.campaign.adAccount.externalId
       externalId = item.externalId
       token = item.adSet.campaign.adAccount.accessTokenEnc
       originalAdSetDbId = item.adSetId
@@ -73,10 +69,10 @@ export async function POST(req: Request) {
     console.log(`[Meta Duplicate] Iniciando duplicação (${level}): ${externalId}`)
 
     const result = level === 'campaign'
-      ? await client.duplicateCampaign(externalId, { deepCopy: true, status: 'PAUSED', suffix, accountId: metaAccountId })
+      ? await client.duplicateCampaign(externalId, { deepCopy: true, status: 'PAUSED', suffix })
       : level === 'adset'
-        ? await client.duplicateAdSet(externalId, { deepCopy: true, status: 'PAUSED', suffix, accountId: metaAccountId })
-        : await client.duplicateAd(externalId, { status: 'PAUSED', suffix, accountId: metaAccountId })
+        ? await client.duplicateAdSet(externalId, { deepCopy: true, status: 'PAUSED', suffix })
+        : await client.duplicateAd(externalId, { status: 'PAUSED', suffix })
 
     console.log('[Meta Duplicate] Resposta da Meta:', result)
 
