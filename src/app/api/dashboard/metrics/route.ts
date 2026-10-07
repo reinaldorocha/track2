@@ -8,7 +8,7 @@ import {
 } from '@/lib/metrics'
 import { calculateFinancialMetrics } from '@/lib/calculations/financial-engine'
 import { triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
-import { resolveAnalyticsInterval, nextDay } from '@/lib/meta/insight-helpers'
+import { resolveAnalyticsInterval, nextDay, parseMetaFunnelActions } from '@/lib/meta/insight-helpers'
 import { after } from 'next/server'
 
 export async function GET(req: Request) {
@@ -131,13 +131,34 @@ export async function GET(req: Request) {
       }
     })
 
-    const pageViews = trackingEvents.filter(e => 
-      e.eventName.toLowerCase().includes('pageview') || e.eventName.toLowerCase().includes('viewcontent')
-    ).length
+    const pageViews = trackingEvents.filter(e => {
+      const nm = (e.eventName || '').toLowerCase()
+      return nm === 'pageview' || nm === 'page_view'
+    }).length
 
-    const checkoutInitiations = trackingEvents.filter(e => 
-      e.eventName.toLowerCase().includes('initiatecheckout') || e.eventName.toLowerCase().includes('checkout')
-    ).length
+    const checkoutInitiations = trackingEvents.filter(e => {
+      const nm = (e.eventName || '').toLowerCase()
+      return nm === 'initiatecheckout' || nm === 'initiate_checkout' || nm === 'checkout'
+    }).length
+
+    // Consultar ações reais do Meta Ads no período
+    let metaPageViews = 0
+    let metaICs = 0
+    try {
+      const insightsWithActions = await prisma.campaignInsight.findMany({
+        where: {
+          campaign: { workspaceId },
+          dateStart: { gte: interval.insightDateStart, lte: interval.insightDateStop }
+        },
+        select: { actions: true }
+      })
+      for (const ins of insightsWithActions) {
+        if (!ins.actions) continue
+        const metrics = parseMetaFunnelActions(ins.actions)
+        metaPageViews += metrics.pageViews
+        metaICs += metrics.initiateCheckouts
+      }
+    } catch {}
 
     // 4. Consultar Despesas, Taxas e Impostos no Período
     const expenses = await prisma.expense.findMany({
@@ -248,9 +269,12 @@ export async function GET(req: Request) {
     }))
 
     // 7. Funil Real de Métricas
-    const effectiveClicks = clicks || (pageViews > 0 ? Math.round(pageViews * 1.5) : 0)
-    const effectivePageViews = pageViews || Math.round(effectiveClicks * 0.75)
-    const effectiveICs = checkoutInitiations || (totalSales > 0 ? Math.round(totalSales * 1.5) : 0)
+    const finalPageViews = metaPageViews > 0 ? metaPageViews : pageViews
+    const finalICs = metaICs > 0 ? metaICs : checkoutInitiations
+
+    const effectiveClicks = clicks || (finalPageViews > 0 ? Math.round(finalPageViews * 1.5) : 0)
+    const effectivePageViews = finalPageViews || (effectiveClicks > 0 ? Math.round(effectiveClicks * 0.75) : 0)
+    const effectiveICs = finalICs || (totalSales > 0 ? Math.round(totalSales * 1.5) : 0)
 
     const cpa = calcCPA(adSpend, approvedSales)
     const cpc = calcCPC(adSpend, clicks)

@@ -133,6 +133,54 @@ export function midnight(value: string, timezone: string): Date {
   return new Date(instant)
 }
 
+export function parseMetaFunnelActions(actionsJson: string | null | undefined | Array<{ action_type: string; value: string }>): {
+  pageViews: number
+  initiateCheckouts: number
+  leads: number
+} {
+  if (!actionsJson) return { pageViews: 0, initiateCheckouts: 0, leads: 0 }
+
+  let actions: Array<{ action_type: string; value: string }> = []
+  try {
+    actions = typeof actionsJson === 'string' ? JSON.parse(actionsJson) : actionsJson
+  } catch {
+    return { pageViews: 0, initiateCheckouts: 0, leads: 0 }
+  }
+  if (!Array.isArray(actions)) return { pageViews: 0, initiateCheckouts: 0, leads: 0 }
+
+  // 1. Landing Page Views (Vis. Página)
+  // Ordem canônica de prioridade da Meta. NUNCA somar múltiplos tipos do mesmo evento!
+  // 'landing_page_view' é a métrica oficial pós-clique. Se ausente, busca view_content/pageview.
+  const pvAction =
+    actions.find(a => a.action_type === 'landing_page_view') ||
+    actions.find(a => a.action_type === 'offsite_conversion.fb_pixel_view_content') ||
+    actions.find(a => a.action_type === 'view_content') ||
+    actions.find(a => a.action_type === 'omni_view_content') ||
+    actions.find(a => a.action_type === 'pageview')
+
+  // 2. Initiate Checkouts (ICs / Finalizações de Compra Iniciadas)
+  // Ordem canônica de prioridade da Meta. NUNCA somar!
+  const icAction =
+    actions.find(a => a.action_type === 'offsite_conversion.fb_pixel_initiate_checkout') ||
+    actions.find(a => a.action_type === 'initiate_checkout') ||
+    actions.find(a => a.action_type === 'omni_initiated_checkout') ||
+    actions.find(a => a.action_type?.endsWith('_initiate_checkout')) ||
+    actions.find(a => a.action_type?.includes('initiate_checkout'))
+
+  // 3. Leads (Cadastros)
+  const leadAction =
+    actions.find(a => a.action_type === 'offsite_conversion.fb_pixel_lead') ||
+    actions.find(a => a.action_type === 'lead') ||
+    actions.find(a => a.action_type === 'omni_lead') ||
+    actions.find(a => a.action_type?.includes('lead'))
+
+  return {
+    pageViews: pvAction ? parseInt(pvAction.value, 10) || 0 : 0,
+    initiateCheckouts: icAction ? parseInt(icAction.value, 10) || 0 : 0,
+    leads: leadAction ? parseInt(leadAction.value, 10) || 0 : 0,
+  }
+}
+
 export function measure(insights: MetaInsight[]) {
   if (!insights.length) return { spend: null, impressions: null, clicks: null, metaPurchases: null, ic: null }
   let ic = 0

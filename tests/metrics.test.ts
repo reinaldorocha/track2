@@ -20,6 +20,9 @@ import {
 import {
   normalizeSaleInstallments
 } from '../src/lib/integrations/normalizer'
+import {
+  parseMetaFunnelActions
+} from '../src/lib/meta/insight-helpers'
 
 describe('Cálculos de Métricas de Marketing e Finanças', () => {
   it('Cálculo de CPM (Custo por Mil Impressões)', () => {
@@ -339,5 +342,31 @@ describe('Filtros de Período e Agregações Temporais', () => {
     assert.equal(normalizeSaleInstallments({ purchase: { installments_number: 4 } }), 4)
     assert.equal(normalizeSaleInstallments({ Order: { installments: 2 } }), 2)
     assert.equal(normalizeSaleInstallments({}), 1)
+  })
+
+  it('Funil Meta Ads: parseMetaFunnelActions extrai métricas canônicas sem somar sinônimos duplicados (evita 166 e 85)', () => {
+    // Array típico retornado pela Meta com sinônimos de PageView e InitiateCheckout
+    const metaActions = [
+      { action_type: 'link_click', value: '57' },
+      { action_type: 'landing_page_view', value: '50' },
+      { action_type: 'view_content', value: '58' },
+      { action_type: 'omni_view_content', value: '58' },
+      { action_type: 'offsite_conversion.fb_pixel_view_content', value: '58' },
+      { action_type: 'offsite_conversion.fb_pixel_initiate_checkout', value: '29' },
+      { action_type: 'initiate_checkout', value: '28' },
+      { action_type: 'omni_initiated_checkout', value: '28' }
+    ]
+
+    const parsed = parseMetaFunnelActions(metaActions)
+
+    // Vis. Página DEVE ser a métrica canônica 'landing_page_view' (50), NUNCA a soma (50 + 58 + 58 = 166)
+    assert.equal(parsed.pageViews, 50, 'PageViews deve ser a métrica canônica de landing_page_view (50), não 166')
+
+    // ICs DEVE ser a métrica canônica de pixel/checkout (29), NUNCA a soma (29 + 28 + 28 = 85)
+    assert.equal(parsed.initiateCheckouts, 29, 'ICs deve ser a métrica canônica de initiate_checkout (29), não 85')
+
+    // Payload vazio ou inválido
+    assert.deepEqual(parseMetaFunnelActions(null), { pageViews: 0, initiateCheckouts: 0, leads: 0 })
+    assert.deepEqual(parseMetaFunnelActions('invalid json'), { pageViews: 0, initiateCheckouts: 0, leads: 0 })
   })
 })

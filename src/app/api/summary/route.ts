@@ -9,7 +9,7 @@ import {
 } from '@/lib/metrics'
 import { calculateFinancialMetrics, calculateSaleFee } from '@/lib/calculations/financial-engine'
 import { triggerBackgroundMetaSyncIfNeeded } from '@/lib/meta/auto-sync'
-import { resolveAnalyticsInterval, nextDay } from '@/lib/meta/insight-helpers'
+import { resolveAnalyticsInterval, nextDay, parseMetaFunnelActions } from '@/lib/meta/insight-helpers'
 import { after } from 'next/server'
 
 export async function GET(req: Request) {
@@ -130,10 +130,25 @@ export async function GET(req: Request) {
       select: { eventName: true, eventTime: true, value: true }
     })
 
-    const localPageViews = trackingEvents.filter(e => e.eventName.toLowerCase().includes('pageview') || e.eventName.toLowerCase().includes('viewcontent')).length
-    const localICs = trackingEvents.filter(e => e.eventName.toLowerCase().includes('initiatecheckout') || e.eventName.toLowerCase().includes('checkout')).length
-    const localLeads = trackingEvents.filter(e => e.eventName.toLowerCase().includes('lead')).length
-    const conversasCount = trackingEvents.filter(e => e.eventName.toLowerCase().includes('contact') || e.eventName.toLowerCase().includes('conversation') || e.eventName.toLowerCase().includes('whatsapp')).length
+    const localPageViews = trackingEvents.filter(e => {
+      const nm = (e.eventName || '').toLowerCase()
+      return nm === 'pageview' || nm === 'page_view'
+    }).length
+
+    const localICs = trackingEvents.filter(e => {
+      const nm = (e.eventName || '').toLowerCase()
+      return nm === 'initiatecheckout' || nm === 'initiate_checkout' || nm === 'checkout'
+    }).length
+
+    const localLeads = trackingEvents.filter(e => {
+      const nm = (e.eventName || '').toLowerCase()
+      return nm === 'lead'
+    }).length
+
+    const conversasCount = trackingEvents.filter(e => {
+      const nm = (e.eventName || '').toLowerCase()
+      return nm.includes('contact') || nm.includes('conversation') || nm.includes('whatsapp')
+    }).length
 
     // Também verificar ações de pixel agregadas no CampaignInsight (Meta Ads Insights)
     let metaPageViews = 0
@@ -146,26 +161,16 @@ export async function GET(req: Request) {
       })
       for (const ins of insightsWithActions) {
         if (!ins.actions) continue
-        const parsed = typeof ins.actions === 'string' ? JSON.parse(ins.actions) : ins.actions
-        if (Array.isArray(parsed)) {
-          for (const a of parsed) {
-            const at = String(a.action_type || '').toLowerCase()
-            const val = parseInt(a.value, 10) || 0
-            if (at.includes('landing_page_view') || at.includes('pageview') || at.includes('view_content')) {
-              metaPageViews += val
-            } else if (at.includes('initiate_checkout') || at.includes('checkout')) {
-              metaICs += val
-            } else if (at.includes('lead')) {
-              metaLeads += val
-            }
-          }
-        }
+        const metrics = parseMetaFunnelActions(ins.actions)
+        metaPageViews += metrics.pageViews
+        metaICs += metrics.initiateCheckouts
+        metaLeads += metrics.leads
       }
     } catch {}
 
-    const pageViewsCount = Math.max(localPageViews, metaPageViews)
-    const icCount = Math.max(localICs, metaICs)
-    const leadsCount = Math.max(localLeads, metaLeads)
+    const pageViewsCount = metaPageViews > 0 ? metaPageViews : localPageViews
+    const icCount = metaICs > 0 ? metaICs : localICs
+    const leadsCount = metaLeads > 0 ? metaLeads : localLeads
 
     // 4. Despesas, Taxas & Impostos
     const expenses = await prisma.expense.findMany({
