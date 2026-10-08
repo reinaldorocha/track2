@@ -58,7 +58,8 @@ export default function TrackerPage() {
   const scriptTag = `<script 
   src="${appUrl}/tracker.js" 
   data-api-url="${appUrl}" 
-  data-workspace-id="${workspaceId || 'SEU_WORKSPACE_ID'}"${pixelId ? `\n  data-pixel-id="${pixelId}"` : ''}${!autoPixel ? '\n  data-auto-pixel="false"' : ''} 
+  data-workspace-id="${workspaceId || 'SEU_WORKSPACE_ID'}" 
+  data-pixel-id="${pixelId || 'SEU_PIXEL_ID'}"${!autoPixel ? '\n  data-auto-pixel="false"' : ''} 
   async
 ></script>`
 

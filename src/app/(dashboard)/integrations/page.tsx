@@ -86,6 +86,7 @@ function IntegrationsHubContent() {
   const [utmContent, setUtmContent] = useState("video_01");
   const [utmTerm, setUtmTerm] = useState("feed");
   const [generatedUtmUrl, setGeneratedUtmUrl] = useState("");
+  const [selectedSnippetPixelId, setSelectedSnippetPixelId] = useState("");
 
   // Estados dos Testes
   const [testStatus, setTestStatus] = useState<string | null>(null);
@@ -438,6 +439,9 @@ function IntegrationsHubContent() {
   const pixels = pixelsData?.pixels || [];
   const products = productsData?.products || [];
   const genericEndpoints = genericEndpointsData?.endpoints || [];
+
+  const activePixel = pixels.find((p: any) => p.status === "active") || pixels[0];
+  const targetSnippetPixelId = selectedSnippetPixelId || activePixel?.pixelId || "SEU_PIXEL_ID";
 
   const tabs: Array<"ANÚNCIOS" | "WEBHOOKS" | "UTMs" | "PIXEL" | "TESTES" | "INSPETOR"> = [
     "ANÚNCIOS",
@@ -1144,11 +1148,28 @@ function IntegrationsHubContent() {
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Cole antes do fechamento da tag &lt;/body&gt; em todas as páginas do seu site ou funil.
               </p>
+              {pixels.length > 1 && (
+                <div className="flex items-center justify-between gap-2 p-2 bg-slate-50 dark:bg-[#0E2442]/60 border border-slate-200/70 dark:border-[#1E3E6B] rounded-lg text-xs">
+                  <span className="text-slate-600 dark:text-slate-300 font-medium text-[11px]">Pixel inserido no script:</span>
+                  <select
+                    value={targetSnippetPixelId}
+                    onChange={(e) => setSelectedSnippetPixelId(e.target.value)}
+                    className="bg-white dark:bg-[#081A33] border border-slate-300 dark:border-[#1E3E6B] rounded px-2 py-1 text-xs text-slate-800 dark:text-slate-100 focus:ring-1 focus:ring-blue-500"
+                  >
+                    {pixels.map((p: any) => (
+                      <option key={p.id} value={p.pixelId}>
+                        {p.name} ({p.pixelId})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <pre className="p-3 bg-slate-950 text-slate-200 rounded-lg text-[11px] font-mono overflow-x-auto whitespace-pre">
 {`<script 
   src="${appUrl}/tracker.js" 
   data-api-url="${appUrl}" 
   data-workspace-id="${currentWorkspaceId || 'SEU_WORKSPACE_ID'}" 
+  data-pixel-id="${targetSnippetPixelId}" 
   async
 ></script>`}
               </pre>
@@ -1159,6 +1180,7 @@ function IntegrationsHubContent() {
   src="${appUrl}/tracker.js" 
   data-api-url="${appUrl}" 
   data-workspace-id="${currentWorkspaceId || 'SEU_WORKSPACE_ID'}" 
+  data-pixel-id="${targetSnippetPixelId}" 
   async
 ></script>`,
                     "script_tracker"
@@ -1174,7 +1196,7 @@ function IntegrationsHubContent() {
                   💡 Carregar Meta Pixel automaticamente:
                 </p>
                 <p className="text-[10px] text-blue-800 dark:text-blue-400">
-                  Para que o Tracker carregue o Pixel do Facebook sem precisar colar dois scripts na página, adicione o atributo <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1 py-0.5 rounded">data-pixel-id=&quot;SEU_PIXEL_ID&quot;</code> na tag script.
+                  Com o atributo <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1 py-0.5 rounded">data-pixel-id=&quot;{targetSnippetPixelId}&quot;</code> configurado, o Tracker injeta o Meta Pixel do Facebook diretamente no navegador do visitante sem precisar colar dois scripts na página.
                 </p>
               </div>
             </div>
@@ -1236,6 +1258,47 @@ function IntegrationsHubContent() {
             </button>
           </div>
 
+          {/* Banner de Instalação com Tracker */}
+          <div className="bg-white dark:bg-[#081A33] border border-blue-200/80 dark:border-[#1E3E6B] rounded-xl p-4 shadow-sm space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Code className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                <h3 className="font-bold text-xs text-slate-900 dark:text-white">
+                  Instalação do Pixel no Site / Funil via Tracker
+                </h3>
+              </div>
+              <button
+                onClick={() =>
+                  copyToClipboard(
+`<script 
+  src="${appUrl}/tracker.js" 
+  data-api-url="${appUrl}" 
+  data-workspace-id="${currentWorkspaceId || 'SEU_WORKSPACE_ID'}" 
+  data-pixel-id="${targetSnippetPixelId}" 
+  async
+></script>`,
+                    "script_pixel_card_top"
+                  )
+                }
+                className="self-start sm:self-auto px-3 py-1 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 rounded-lg text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/80 text-blue-700 dark:text-blue-300"
+              >
+                {copiedKey === "script_pixel_card_top" ? "Copiado!" : "Copiar Tag com Pixel"}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Cole antes de <code className="font-mono bg-slate-100 dark:bg-[#0E2442] px-1 py-0.5 rounded">&lt;/body&gt;</code> na sua página. O tracker carrega o script oficial do Facebook Pixel no navegador e sincroniza todos os disparos com a API de Conversões (CAPI) deduplicados automaticamente.
+            </p>
+            <pre className="p-2.5 bg-slate-950 text-slate-200 rounded-lg text-[11px] font-mono overflow-x-auto whitespace-pre">
+{`<script 
+  src="${appUrl}/tracker.js" 
+  data-api-url="${appUrl}" 
+  data-workspace-id="${currentWorkspaceId || 'SEU_WORKSPACE_ID'}" 
+  data-pixel-id="${targetSnippetPixelId}" 
+  async
+></script>`}
+            </pre>
+          </div>
+
           {pixels.length === 0 ? (
             <div className="bg-white dark:bg-[#081A33] border border-slate-200/90 dark:border-[#142C52] rounded-xl p-8 text-center space-y-3">
               <ShieldCheck className="w-10 h-10 text-slate-400 mx-auto" />
@@ -1286,12 +1349,29 @@ function IntegrationsHubContent() {
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 dark:border-[#142C52] flex items-center justify-between">
+                  <div className="pt-3 border-t border-slate-100 dark:border-[#142C52] flex items-center justify-between gap-2">
                     <button
                       onClick={() => runIntegrationTest("pixel")}
                       className="text-xs text-blue-600 dark:text-blue-400 font-bold hover:underline"
                     >
                       Testar Disparo
+                    </button>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+`<script 
+  src="${appUrl}/tracker.js" 
+  data-api-url="${appUrl}" 
+  data-workspace-id="${currentWorkspaceId || 'SEU_WORKSPACE_ID'}" 
+  data-pixel-id="${pix.pixelId}" 
+  async
+></script>`,
+                          `script_pixel_${pix.id}`
+                        )
+                      }
+                      className="text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline"
+                    >
+                      {copiedKey === `script_pixel_${pix.id}` ? "Copiado!" : "Copiar Script"}
                     </button>
                     <button
                       onClick={() => deletePixelMutation.mutate(pix.id)}
