@@ -86,18 +86,32 @@ export async function POST(req: Request) {
     const detectedPixelId = pixelIdMatches ? pixelIdMatches[1] : null
 
     // 3. Verificação de Gateways de Checkout
-    const checkoutKeywords = [
+    const customDomainsMatch = html.match(/data-checkout-domains\s*=\s*['"]([^'"]+)['"]/i)
+    const customDomains = customDomainsMatch ? customDomainsMatch[1].split(',').map(d => d.trim()).filter(Boolean) : []
+
+    const checkoutKeywords: Array<{ name: string; pattern: RegExp }> = [
+      { name: 'Getfy', pattern: /getfy\.com|getfy\.com\.br|getfy\.cloud|profjonathanrocha\.com\.br|\/c\/[a-z0-9_-]+/i },
       { name: 'Kiwify', pattern: /kiwify\.com\.br/i },
       { name: 'Hotmart', pattern: /hotmart\.com/i },
       { name: 'Cakto', pattern: /cakto\.com\.br|cacto\.com\.br/i },
-      { name: 'Getfy', pattern: /getfy\.com|getfy\.cloud/i },
       { name: 'Yampi', pattern: /yampi\.io|yampi\.com\.br/i },
       { name: 'Shopify', pattern: /myshopify\.com|checkout/i },
       { name: 'Eduzz', pattern: /eduzz\.com/i },
       { name: 'Braip', pattern: /braip\.com/i },
       { name: 'Kirvano', pattern: /kirvano\.com/i },
       { name: 'Monetizze', pattern: /monetizze\.com\.br/i },
+      { name: 'Ticto', pattern: /ticto\.com\.br/i },
+      { name: 'PerfectPay', pattern: /perfectpay\.com\.br/i },
+      { name: 'CartPanda', pattern: /cartpanda\.com/i },
+      { name: 'Greenn', pattern: /greenn\.com\.br/i },
+      { name: 'Appmax', pattern: /appmax\.com\.br/i },
+      { name: 'Checkout Próprio', pattern: /pay\.|pagamento\.|seguro\.|\/checkout/i },
     ]
+
+    for (const cd of customDomains) {
+      const escaped = cd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      checkoutKeywords.push({ name: `Personalizado (${cd})`, pattern: new RegExp(escaped, 'i') })
+    }
 
     const detectedCheckouts: Array<{ platform: string; count: number }> = []
     const linkMatches = html.match(/href\s*=\s*["']([^"']+)["']/gi) || []
